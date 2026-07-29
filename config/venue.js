@@ -10,29 +10,44 @@ const VENUE_CONFIG = {
   ],
 
   secondaryTVs: [
-    { id: "secondary_1" },
-    { id: "secondary_2" },
-    { id: "secondary_3", isDiehardScreen: true },
-    { id: "secondary_4" },
-    { id: "secondary_5" },
-    { id: "secondary_6" },
-    { id: "secondary_7" },
-    { id: "secondary_8" },
-    { id: "secondary_9" },
-    { id: "secondary_10" }
+    { id: "secondary_1", saturationEligible: true },
+    { id: "secondary_2", saturationEligible: true },
+    { id: "secondary_3", saturationEligible: false, isDiehardScreen: true },
+    { id: "secondary_4", saturationEligible: true },
+    { id: "secondary_5", saturationEligible: true },
+    { id: "secondary_6", saturationEligible: true },
+    { id: "secondary_7", saturationEligible: true },
+    { id: "secondary_8", saturationEligible: true },
+    { id: "secondary_9", saturationEligible: true },
+    { id: "secondary_10", saturationEligible: true }
   ],
 
-  lockListTeams: [
-    "Washington Commanders",
-    "Washington Capitals",
-    "Washington Nationals",
-    "Washington Wizards",
-    "Liverpool FC"
+  lockList: [
+    {
+      team: "Washington Commanders",
+      trigger: "any_game",
+      anchorMode: "3-anchor-lock",
+      saturation: 0.70
+    },
+    {
+      team: "Washington Capitals",
+      trigger: "playoff_only",
+      anchorMode: "3-anchor-lock",
+      saturation: 0.60
+    },
+    {
+      team: "Washington Nationals",
+      trigger: "playoff_only",
+      anchorMode: "3-anchor-lock",
+      saturation: 0.60
+    },
+    {
+      team: "Washington Wizards",
+      trigger: "playoff_only",
+      anchorMode: "3-anchor-lock",
+      saturation: 0.60
+    }
   ],
-
-  lockListEvents: ["Super Bowl"],
-
-  dcPlayoffAutoLock: true,
 
   teamRelevanceTable: {
     "Washington Commanders": 90,

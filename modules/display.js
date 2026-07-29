@@ -1,32 +1,36 @@
 // Phase 2: Display and assignment logic
 // Determines which games go on which TVs
 
-function isOnLockList(game) {
-  const { lockListTeams, lockListEvents } = VENUE_CONFIG;
-
-  // Check lock list events
-  if (lockListEvents.includes("Super Bowl") &&
-      (game.homeTeam.includes("Bowl") || game.awayTeam.includes("Bowl"))) {
-    return true;
-  }
-
-  // Check if either team is on lock list
-  for (const team of lockListTeams) {
-    if (game.homeTeam === team || game.awayTeam === team) {
-      // For DC teams, only lock on playoff
-      if (["Washington Capitals", "Washington Nationals", "Washington Wizards"].includes(team)) {
-        return game.isPlayoff;
+function getActiveLockListGame(scoredGames, venueConfig) {
+  // Check if any game matches the lock list
+  for (const game of scoredGames) {
+    for (const lockItem of venueConfig.lockList) {
+      if (lockItem.team) {
+        // Check if team matches
+        if (game.homeTeam === lockItem.team || game.awayTeam === lockItem.team) {
+          // Check trigger condition
+          if (lockItem.trigger === "any_game") {
+            return { game, lockItem };
+          }
+          if (lockItem.trigger === "playoff_only" && game.isPlayoff) {
+            return { game, lockItem };
+          }
+        }
       }
-      // Commanders and Liverpool lock all games
-      return true;
+      if (lockItem.event) {
+        // Check for Super Bowl
+        if (lockItem.event === "Super Bowl" &&
+            (game.homeTeam.includes("Super") || game.awayTeam.includes("Super"))) {
+          return { game, lockItem };
+        }
+      }
     }
   }
-
-  return false;
+  return null;
 }
 
-function assignAnchorTVs(scoredGames) {
-  const anchors = VENUE_CONFIG.anchorTVs;
+function assignAnchorTVs(scoredGames, venueConfig) {
+  const anchors = venueConfig.anchorTVs;
   const assignments = {};
 
   // Initialize all anchors as empty
@@ -34,29 +38,28 @@ function assignAnchorTVs(scoredGames) {
     assignments[tv.id] = null;
   });
 
+  // Check for lock list game first
+  const lockMatch = getActiveLockListGame(scoredGames, venueConfig);
+  if (lockMatch) {
+    // Lock list game takes all 3 anchors
+    anchors.forEach(tv => {
+      assignments[tv.id] = lockMatch.game;
+    });
+    return { assignments, lockGame: lockMatch.game, lockItem: lockMatch.lockItem };
+  }
+
   // Sort by channel score (highest first)
   const sorted = [...scoredGames].sort((a, b) => b.channelScore - a.channelScore);
 
-  // Check for lock list games first
-  const lockListGames = sorted.filter(g => isOnLockList(g));
-  if (lockListGames.length > 0) {
-    // Lock list game takes all 3 anchors
-    const lockGame = lockListGames[0];
-    anchors.forEach(tv => {
-      assignments[tv.id] = lockGame;
-    });
-    return assignments;
-  }
-
-  // No lock list - check for 2-1 split (top game leads by 15+)
+  // Check for 2-1 split (top game leads by 15+)
   if (sorted.length >= 2) {
     const gap = sorted[0].channelScore - sorted[1].channelScore;
-    if (gap >= VENUE_CONFIG.thresholds.dominanceGap) {
+    if (gap >= venueConfig.thresholds.dominanceGap) {
       // 2-1 split: outer anchors get top game, center gets #2
       assignments[anchors[0].id] = sorted[0]; // left
       assignments[anchors[2].id] = sorted[0]; // right
       assignments[anchors[1].id] = sorted[1]; // center
-      return assignments;
+      return { assignments, lockGame: null, lockItem: null };
     }
   }
 
@@ -65,16 +68,18 @@ function assignAnchorTVs(scoredGames) {
     assignments[anchors[i].id] = sorted[i];
   }
 
-  return assignments;
+  return { assignments, lockGame: null, lockItem: null };
 }
 
-function assignSecondaryTVs(scoredGames, anchorAssignments) {
-  const secondaries = VENUE_CONFIG.secondaryTVs;
+function assignSecondaryTVs(scoredGames, anchorAssignments, lockGame, lockItem, venueConfig) {
+  const secondaries = venueConfig.secondaryTVs;
   const assignments = {};
+  const saturationMap = {};
 
-  // Initialize all secondaries as empty
+  // Initialize all secondaries as empty, track saturation status
   secondaries.forEach(tv => {
     assignments[tv.id] = null;
+    saturationMap[tv.id] = false;
   });
 
   // Get games not on anchors
@@ -87,29 +92,62 @@ function assignSecondaryTVs(scoredGames, anchorAssignments) {
   const availableGames = scoredGames.filter(g => !anchorGameIds.has(g.id))
     .sort((a, b) => b.channelScore - a.channelScore);
 
-  // Assign available games to secondaries in score order
-  for (let i = 0; i < secondaries.length; i++) {
-    if (i < availableGames.length) {
-      assignments[secondaries[i].id] = availableGames[i];
-    } else {
-      // Repeat top game if we run out
-      const topGame = availableGames[0];
-      if (topGame) {
-        assignments[secondaries[i].id] = topGame;
+  // Calculate saturation (lock list privilege only)
+  const saturationCount = lockGame && lockItem ?
+    Math.floor(
+      secondaries.filter(tv => tv.saturationEligible).length * lockItem.saturation
+    ) : 0;
+
+  // Fill saturation slots with lock game
+  let saturationFilled = 0;
+  if (saturationCount > 0) {
+    for (const tv of secondaries) {
+      if (tv.saturationEligible && saturationFilled < saturationCount) {
+        assignments[tv.id] = lockGame;
+        saturationMap[tv.id] = true;
+        saturationFilled++;
       }
     }
   }
 
-  return assignments;
+  // Fill remaining secondary TVs with available games (no repetition)
+  let gameIndex = 0;
+  for (const tv of secondaries) {
+    // Skip if already filled by saturation
+    if (assignments[tv.id] !== null) continue;
+
+    // Fill with next available game, or leave blank
+    if (gameIndex < availableGames.length) {
+      assignments[tv.id] = availableGames[gameIndex];
+      gameIndex++;
+    }
+    // If no more games, leave TV blank (fix for repetition bug)
+  }
+
+  return { assignments, saturationMap };
 }
 
-function createTVAssignments(scoredGames) {
-  const anchorAssignments = assignAnchorTVs(scoredGames);
-  const secondaryAssignments = assignSecondaryTVs(scoredGames, anchorAssignments);
+function createTVAssignments(scoredGames, venueConfig) {
+  const anchorResult = assignAnchorTVs(scoredGames, venueConfig);
+  const secondaryResult = assignSecondaryTVs(
+    scoredGames,
+    anchorResult.assignments,
+    anchorResult.lockGame,
+    anchorResult.lockItem,
+    venueConfig
+  );
 
   return {
-    anchors: anchorAssignments,
-    secondaries: secondaryAssignments,
+    anchors: anchorResult.assignments,
+    secondaries: secondaryResult.assignments,
+    saturationMap: secondaryResult.saturationMap,
+    lockGame: anchorResult.lockGame,
+    lockItem: anchorResult.lockItem,
     allGames: scoredGames
   };
+}
+
+function getDiehardScreenId(venueConfig) {
+  const diehard = venueConfig.secondaryTVs.find(tv => tv.isDiehardScreen);
+  return diehard ? diehard.id : null;
 }

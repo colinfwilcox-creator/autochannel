@@ -164,6 +164,12 @@ main {
   letter-spacing: 0.5px;
 }
 
+.tv-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .lock-badge {
   background: #e74c3c;
   color: white;
@@ -171,6 +177,23 @@ main {
   border-radius: 3px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.sat-badge {
+  background: #f39c12;
+  color: white;
+  padding: 3px 6px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tv-diehard {
+  border-color: #e74c3c !important;
+  background: linear-gradient(135deg, rgba(231, 76, 60, 0.15) 0%, #2a2a4a 100%) !important;
+  box-shadow: 0 0 25px rgba(231, 76, 60, 0.25) !important;
 }
 
 .game-content {
@@ -251,6 +274,37 @@ main {
 .scores.small span {
   color: #aaa;
   font-size: 10px;
+}
+
+.state-label {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.state-label.active {
+  background: rgba(39, 174, 96, 0.3);
+  color: #2ecc71;
+}
+
+.state-label.protected {
+  background: rgba(52, 152, 219, 0.3);
+  color: #3498db;
+}
+
+.state-label.demoted {
+  background: rgba(231, 76, 60, 0.3);
+  color: #e74c3c;
+}
+
+.state-label.finished {
+  background: rgba(149, 165, 166, 0.3);
+  color: #95a5a6;
 }
 
 .no-content {

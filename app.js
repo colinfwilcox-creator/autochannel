@@ -6,6 +6,19 @@ let assignments = null;
 let lastUpdateTime = null;
 let isLoading = false;
 
+function getAnchorState(game) {
+  if (!game) return null;
+  if (game.gameStatus === "final") return "finished";
+  if (game.gamePhase > VENUE_CONFIG.thresholds.completionProtectionPhase &&
+      game.channelScore >= VENUE_CONFIG.thresholds.completionProtectionMinScore) {
+    return "protected";
+  }
+  if (game.channelScore < VENUE_CONFIG.thresholds.blowoutDemotion) {
+    return "demoted";
+  }
+  return "active";
+}
+
 async function fetchAndUpdate() {
   if (isLoading) return;
 
@@ -19,8 +32,14 @@ async function fetchAndUpdate() {
     // Score each game
     const scoredGames = scoreGames(gameData.games);
 
+    // Add anchor states
+    const scoredWithState = scoredGames.map(g => ({
+      ...g,
+      anchorState: getAnchorState(g)
+    }));
+
     // Create TV assignments
-    assignments = createTVAssignments(scoredGames);
+    assignments = createTVAssignments(scoredWithState, VENUE_CONFIG);
 
     lastUpdateTime = new Date();
     displayDashboard();
@@ -53,7 +72,7 @@ function displayDashboard() {
   anchorsContainer.className = "tvs-container";
 
   for (const [tvId, game] of Object.entries(assignments.anchors)) {
-    anchorsContainer.appendChild(createTVCard(tvId, game, "anchor"));
+    anchorsContainer.appendChild(createTVCard(tvId, game, "anchor", VENUE_CONFIG));
   }
 
   anchorsSection.appendChild(anchorsContainer);
@@ -66,8 +85,11 @@ function displayDashboard() {
   const secondariesContainer = document.createElement("div");
   secondariesContainer.className = "tvs-container";
 
+  const diehardId = getDiehardScreenId(VENUE_CONFIG);
   for (const [tvId, game] of Object.entries(assignments.secondaries)) {
-    secondariesContainer.appendChild(createTVCard(tvId, game, "secondary"));
+    const isSaturated = assignments.saturationMap[tvId];
+    const isDiehard = tvId === diehardId;
+    secondariesContainer.appendChild(createTVCard(tvId, game, "secondary", VENUE_CONFIG, isSaturated, isDiehard));
   }
 
   secondariesSection.appendChild(secondariesContainer);
@@ -101,22 +123,29 @@ function displayDashboard() {
   dashboard.appendChild(scoresSection);
 }
 
-function createTVCard(tvId, game, tvType) {
+function createTVCard(tvId, game, tvType, venueConfig, isSaturated = false, isDiehard = false) {
   const card = document.createElement("div");
-  card.className = `tv-card tv-${tvType}`;
+  let cardClass = `tv-card tv-${tvType}`;
+  if (isDiehard) cardClass += " tv-diehard";
+  card.className = cardClass;
 
   if (!game) {
-    card.innerHTML = `<div class="tv-id">${tvId}</div><div class="no-content">Empty</div>`;
+    card.innerHTML = `<div class="tv-id">${tvId}${isDiehard ? ' — Diehard Screen' : ''}</div><div class="no-content">Empty</div>`;
     return card;
   }
 
-  const isLocked = isOnLockList(game);
+  const isLocked = assignments.lockGame && game.id === assignments.lockGame.id;
+  const satBadge = isSaturated ? `<span class="sat-badge">SAT</span>` : "";
   const lockBadge = isLocked ? `<span class="lock-badge">🔒 LOCKED</span>` : "";
+  const stateLabel = game.anchorState ? `<span class="state-label ${game.anchorState}">${game.anchorState.toUpperCase()}</span>` : "";
 
   card.innerHTML = `
     <div class="tv-header">
-      <div class="tv-id">${tvId}</div>
-      ${lockBadge}
+      <div class="tv-id">${tvId}${isDiehard ? ' — Diehard' : ''}</div>
+      <div class="tv-badges">
+        ${satBadge}
+        ${lockBadge}
+      </div>
     </div>
     <div class="game-content">
       <div class="matchup">
@@ -139,6 +168,7 @@ function createTVCard(tvId, game, tvType) {
         <span>Rel: ${game.relevance.toFixed(0)}</span>
         <span>Vit: ${game.vitality.toFixed(0)}</span>
       </div>
+      ${stateLabel}
     </div>
   `;
 

@@ -5,6 +5,7 @@ let gameData = null;
 let assignments = null;
 let lastUpdateTime = null;
 let isLoading = false;
+let gameToggleState = {}; // Track which games are toggled on/off
 
 function getAnchorState(game) {
   if (!game) return null;
@@ -29,8 +30,18 @@ async function fetchAndUpdate() {
     // Fetch games
     gameData = await fetchGames();
 
+    // Initialize toggle state for new games
+    gameData.games.forEach(g => {
+      if (!(g.id in gameToggleState)) {
+        gameToggleState[g.id] = true; // default: all games on
+      }
+    });
+
+    // Filter games by toggle state
+    const activeGames = gameData.games.filter(g => gameToggleState[g.id] !== false);
+
     // Score each game
-    const scoredGames = scoreGames(gameData.games);
+    const scoredGames = scoreGames(activeGames);
 
     // Add anchor states
     const scoredWithState = scoredGames.map(g => ({
@@ -40,6 +51,9 @@ async function fetchAndUpdate() {
 
     // Create TV assignments
     assignments = createTVAssignments(scoredWithState, VENUE_CONFIG);
+
+    // Store full game data for toggle panel (includes disabled games)
+    assignments.allGamesWithToggle = gameData.games;
 
     lastUpdateTime = new Date();
     displayDashboard();
@@ -57,12 +71,17 @@ function displayDashboard() {
     return;
   }
 
-  const statusText = `${assignments.allGames.length} games scored at ${lastUpdateTime.toLocaleTimeString()}`;
+  const activeGameCount = Object.values(gameToggleState).filter(v => v !== false).length;
+  const statusText = `${activeGameCount} active games at ${lastUpdateTime.toLocaleTimeString()}`;
   document.getElementById("status").textContent = statusText;
 
   // Render TV layout
   const dashboard = document.getElementById("dashboard");
   dashboard.innerHTML = "";
+
+  // Render toggle panel
+  const togglePanel = createTogglePanel();
+  dashboard.appendChild(togglePanel);
 
   // Anchor TVs section
   const anchorsSection = document.createElement("div");
@@ -123,6 +142,56 @@ function displayDashboard() {
   dashboard.appendChild(scoresSection);
 }
 
+function createTogglePanel() {
+  const panel = document.createElement("div");
+  panel.className = "toggle-panel";
+
+  const header = document.createElement("div");
+  header.className = "toggle-panel-header";
+  header.innerHTML = "<h2>GAME CONTROL PANEL (Click to Toggle)</h2>";
+  panel.appendChild(header);
+
+  const gamesContainer = document.createElement("div");
+  gamesContainer.className = "toggle-games-container";
+
+  // Sort games by channel score
+  const sorted = [...assignments.allGamesWithToggle].sort((a, b) => {
+    const aScore = a.channelScore || 0;
+    const bScore = b.channelScore || 0;
+    return bScore - aScore;
+  });
+
+  for (const game of sorted) {
+    const isActive = gameToggleState[game.id] !== false;
+    const item = document.createElement("div");
+    item.className = `toggle-item ${isActive ? "active" : "inactive"}`;
+
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.className = "toggle-switch";
+    toggle.checked = isActive;
+    toggle.addEventListener("change", () => toggleGame(game.id));
+
+    const label = document.createElement("label");
+    label.className = "toggle-label";
+    label.innerHTML = `
+      <span class="game-info">
+        <span class="sport-badge-small ${game.sport.toLowerCase()}">${game.sport}</span>
+        <span class="matchup-text">${game.awayTeam} @ ${game.homeTeam}</span>
+        <span class="score-text">${game.awayScore}-${game.homeScore}</span>
+        <span class="channel-score-small">${game.channelScore ? game.channelScore.toFixed(1) : "—"}</span>
+      </span>
+    `;
+
+    item.appendChild(toggle);
+    item.appendChild(label);
+    gamesContainer.appendChild(item);
+  }
+
+  panel.appendChild(gamesContainer);
+  return panel;
+}
+
 function createTVCard(tvId, game, tvType, venueConfig, isSaturated = false, isDiehard = false) {
   const card = document.createElement("div");
   let cardClass = `tv-card tv-${tvType}`;
@@ -173,6 +242,37 @@ function createTVCard(tvId, game, tvType, venueConfig, isSaturated = false, isDi
   `;
 
   return card;
+}
+
+function toggleGame(gameId) {
+  gameToggleState[gameId] = !gameToggleState[gameId];
+  // Re-run assignment without fetching new data
+  reAssignWithCurrentGames();
+}
+
+function reAssignWithCurrentGames() {
+  if (!gameData) return;
+
+  // Filter games by toggle state
+  const activeGames = gameData.games.filter(g => gameToggleState[g.id] !== false);
+
+  // Score each game
+  const scoredGames = scoreGames(activeGames);
+
+  // Add anchor states
+  const scoredWithState = scoredGames.map(g => ({
+    ...g,
+    anchorState: getAnchorState(g)
+  }));
+
+  // Create TV assignments
+  assignments = createTVAssignments(scoredWithState, VENUE_CONFIG);
+
+  // Store full game data for toggle panel
+  assignments.allGamesWithToggle = gameData.games;
+
+  lastUpdateTime = new Date();
+  displayDashboard();
 }
 
 function updateStatus(text) {

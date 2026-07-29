@@ -398,6 +398,180 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+/* Toggle Panel */
+.toggle-panel {
+  background: linear-gradient(135deg, rgba(52, 152, 219, 0.15) 0%, rgba(26, 26, 46, 0.9) 100%);
+  border: 2px solid #3498db;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+  backdrop-filter: blur(10px);
+}
+
+.toggle-panel-header {
+  margin-bottom: 15px;
+  border-bottom: 2px solid #3498db;
+  padding-bottom: 10px;
+}
+
+.toggle-panel-header h2 {
+  font-size: 16px;
+  color: #3498db;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.toggle-games-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(20, 20, 35, 0.8);
+  border: 1px solid #444;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.toggle-item.active {
+  border-color: #27ae60;
+  background: rgba(39, 174, 96, 0.1);
+}
+
+.toggle-item.inactive {
+  opacity: 0.6;
+  border-color: #666;
+}
+
+.toggle-item:hover {
+  border-color: #3498db;
+  background: rgba(52, 152, 219, 0.15);
+}
+
+.toggle-switch {
+  width: 40px;
+  height: 22px;
+  appearance: none;
+  background: #555;
+  border-radius: 11px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.3s ease;
+  flex-shrink: 0;
+}
+
+.toggle-switch:checked {
+  background: #27ae60;
+}
+
+.toggle-switch::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  top: 2px;
+  left: 2px;
+  transition: left 0.3s ease;
+}
+
+.toggle-switch:checked::before {
+  left: 20px;
+}
+
+.toggle-label {
+  flex: 1;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+}
+
+.game-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #ddd;
+  flex-wrap: wrap;
+}
+
+.sport-badge-small {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.sport-badge-small.nfl {
+  background: #3498db;
+  color: white;
+}
+
+.sport-badge-small.nhl {
+  background: #27ae60;
+  color: white;
+}
+
+.sport-badge-small.mlb {
+  background: #e74c3c;
+  color: white;
+}
+
+.sport-badge-small.nba {
+  background: #f39c12;
+  color: white;
+}
+
+.sport-badge-small.cfb {
+  background: #9b59b6;
+  color: white;
+}
+
+.sport-badge-small.cbb {
+  background: #e67e22;
+  color: white;
+}
+
+.matchup-text {
+  font-weight: 500;
+  flex-grow: 1;
+  min-width: 120px;
+}
+
+.score-text {
+  font-weight: 700;
+  color: #3498db;
+  min-width: 35px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.channel-score-small {
+  color: #27ae60;
+  font-weight: 600;
+  font-size: 11px;
+  min-width: 30px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.toggle-item.inactive .channel-score-small {
+  color: #888;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   h1 {
@@ -418,5 +592,18 @@ tbody tr:hover {
 
   th, td {
     padding: 6px 4px;
+  }
+
+  .toggle-games-container {
+    grid-template-columns: 1fr;
+  }
+
+  .game-info {
+    flex-wrap: nowrap;
+  }
+
+  .matchup-text {
+    min-width: auto;
+    font-size: 11px;
   }
 }

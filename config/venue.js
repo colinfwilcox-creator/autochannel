@@ -65,5 +65,13 @@ const VENUE_CONFIG = {
     completionProtectionMinScore: 55,
     completionProtectionPhase: 0.85,
     manualOverrideLockSeconds: 1800
-  }
+  },
+
+  fallbackChannels: [
+    "NFL Network",
+    "MLB Network",
+    "NHL Network",
+    "Golf Channel",
+    "ESPN News"
+  ]
 };

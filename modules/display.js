@@ -151,3 +151,18 @@ function getDiehardScreenId(venueConfig) {
   const diehard = venueConfig.secondaryTVs.find(tv => tv.isDiehardScreen);
   return diehard ? diehard.id : null;
 }
+
+function assignFallbackChannels(assignments, venueConfig) {
+  // Collect all empty secondary TV slots
+  const emptySlots = Object.entries(assignments.secondaries)
+    .filter(([tvId, game]) => game === null)
+    .map(([tvId, _]) => tvId);
+
+  // Create fallback map
+  const fallbackMap = {};
+  emptySlots.forEach((tvId, index) => {
+    fallbackMap[tvId] = venueConfig.fallbackChannels[index % venueConfig.fallbackChannels.length];
+  });
+
+  return fallbackMap;
+}

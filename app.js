@@ -52,6 +52,9 @@ async function fetchAndUpdate() {
     // Create TV assignments
     assignments = createTVAssignments(scoredWithState, VENUE_CONFIG);
 
+    // Assign fallback channels to empty slots
+    assignments.fallbackChannels = assignFallbackChannels(assignments, VENUE_CONFIG);
+
     // Store full game data for toggle panel (includes disabled games)
     assignments.allGamesWithToggle = gameData.games;
 
@@ -108,7 +111,8 @@ function displayDashboard() {
   for (const [tvId, game] of Object.entries(assignments.secondaries)) {
     const isSaturated = assignments.saturationMap[tvId];
     const isDiehard = tvId === diehardId;
-    secondariesContainer.appendChild(createTVCard(tvId, game, "secondary", VENUE_CONFIG, isSaturated, isDiehard));
+    const fallbackChannel = assignments.fallbackChannels[tvId];
+    secondariesContainer.appendChild(createTVCard(tvId, game, "secondary", VENUE_CONFIG, isSaturated, isDiehard, fallbackChannel));
   }
 
   secondariesSection.appendChild(secondariesContainer);
@@ -192,14 +196,18 @@ function createTogglePanel() {
   return panel;
 }
 
-function createTVCard(tvId, game, tvType, venueConfig, isSaturated = false, isDiehard = false) {
+function createTVCard(tvId, game, tvType, venueConfig, isSaturated = false, isDiehard = false, fallbackChannel = null) {
   const card = document.createElement("div");
   let cardClass = `tv-card tv-${tvType}`;
   if (isDiehard) cardClass += " tv-diehard";
+  if (!game && fallbackChannel) cardClass += " tv-fallback";
   card.className = cardClass;
 
   if (!game) {
-    card.innerHTML = `<div class="tv-id">${tvId}${isDiehard ? ' — Diehard Screen' : ''}</div><div class="no-content">Empty</div>`;
+    const fallbackDisplay = fallbackChannel ?
+      `<div class="fallback-content"><span class="fallback-label">📺</span><span class="fallback-channel">${fallbackChannel}</span></div>` :
+      `<div class="no-content">Empty</div>`;
+    card.innerHTML = `<div class="tv-id">${tvId}${isDiehard ? ' — Diehard Screen' : ''}</div>${fallbackDisplay}`;
     return card;
   }
 
@@ -267,6 +275,9 @@ function reAssignWithCurrentGames() {
 
   // Create TV assignments
   assignments = createTVAssignments(scoredWithState, VENUE_CONFIG);
+
+  // Assign fallback channels to empty slots
+  assignments.fallbackChannels = assignFallbackChannels(assignments, VENUE_CONFIG);
 
   // Store full game data for toggle panel
   assignments.allGamesWithToggle = gameData.games;

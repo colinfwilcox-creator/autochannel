@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoChannel — Live Game Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>🏈 AutoChannel</h1>
+    <p id="status">Initializing...</p>
+  </header>
+
+  <main>
+    <div id="games-container">
+      <p>Loading...</p>
+    </div>
+  </main>
+
+  <!-- Load config first -->
+  <script src="config/venue.js"></script>
+
+  <!-- Load modules -->
+  <script src="modules/fetcher.js"></script>
+  <script src="modules/scorer.js"></script>
+  <script src="modules/display.js"></script>
+  <script src="config/sports.js"></script>
+
+  <!-- Load main app logic last -->
+  <script src="app.js"></script>
+</body>
+</html>

@@ -399,16 +399,23 @@ check(run(`knownProgrammingNow([], __dcv, new Date("2026-11-23T21:37:00Z")).filt
 const pm = (strengths, A, sports = []) => run(`planMains(${JSON.stringify(strengths.map((x, i) => ({ strength: x, sport: sports[i] || "NBA" })))}, ${A}, __dcv.thresholds)`);
 const t1 = pm([24.5, 22.75, 19.2], 2);
 check(t1.plan.join() === "0,1", `A=2, lead 1.75 < 15 → 1-1: Mains show #1, #2 (${t1.mode})`);
-const t2 = pm([60, 40, 30], 2);
-check(t2.plan.join() === "0,0", `A=2, lead 20 ≥ 15 → every Main shows #1 (${t2.mode})`);
+check(run("__dcv.thresholds.mainTakeoverGap") === 30 && run("__dcv.thresholds.dominanceGap") === 15, "bands: ≥ 30 all #1, 15–30 2-1 + NFL flip, < 15 1-1-1");
+const t2 = pm([65, 30, 20], 2);
+check(t2.plan.join() === "0,0", `A=2, lead 35 ≥ 30 → every Main shows #1 (${t2.mode})`);
+const t2b = pm([60, 40, 30], 2);
+check(t2b.plan.join() === "0,1", `A=2, lead 20 (15–30) → 1-1, since 2-1 is disabled with 2 Mains (${t2b.mode})`);
+const t2c = pm([60, 40, 30], 3);
+check(t2c.plan.join() === "0,1,0", `A=3, lead 20 (15–30) → 2-1, featured on the outer Mains (${t2c.mode})`);
+const t2d = pm([60, 40, 30], 3, ["NBA", "NFL", "NHL"]);
+check(t2d.plan.join() === "1,0,1", `A=3, lead 20, NBA #1 over NFL #2 → NFL flip (${t2d.mode})`);
 const t3 = pm([50, 45, 40, 35], 3);
 check(t3.plan.join() === "0,1,2", `A=3, lead 5 → 1-1-1 (${t3.mode})`);
 const t4 = pm([70, 40, 30], 3);
-check(t4.plan.join() === "0,0,0", `A=3, lead 30 → every Main shows #1 (${t4.mode})`);
+check(t4.plan.join() === "0,0,0", `A=3, lead exactly 30 → every Main shows #1 (${t4.mode})`);
 check(pm([50], 4).plan.join() === "0,0,0,0", "a single item takes every Main");
 run(`var __th2 = { ...__dcv.thresholds, mainTakeoverGap: 30 };`);
 const flip = run(`planMains([{ strength: 70, sport: "NBA" }, { strength: 50, sport: "NFL" }, { strength: 40, sport: "NHL" }], 4, __th2)`);
-check(flip.plan.join() === "1,0,2,1", `with mainTakeoverGap raised to 30, a lead of 20 gives 2-1 + NFL flip (${flip.mode}: ${flip.plan})`);
+check(flip.plan.join() === "1,0,2,1", `A=4, lead 20: 2-1 + NFL flip (${flip.mode}: ${flip.plan})`);
 const two1 = run(`planMains([{ strength: 70, sport: "NBA" }, { strength: 50, sport: "NHL" }, { strength: 40, sport: "NHL" }], 3, __th2)`);
 check(two1.plan.join() === "0,1,0", `…and 2-1 without the flip puts the featured item on the outer Mains (${two1.plan})`);
 

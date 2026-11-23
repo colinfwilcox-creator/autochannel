@@ -5,10 +5,12 @@
 const VENUE_DEFAULTS = {
   thresholds: {
     dominanceGap: 15,
-    // Phase 7: when the #1 item leads #2 by at least this much, every Main TV shows #1.
-    // Below it, the original Main-TV modes apply (1-1-1; 2-1 + NFL flip at dominanceGap).
-    // At 15 (= dominanceGap) the 2-1 mode cannot trigger; raise this to bring it back.
-    mainTakeoverGap: 15,
+    // Main-TV modes (no lock), by how far #1 leads #2:
+    //   lead ≥ mainTakeoverGap (30)        → every Main TV shows #1
+    //   dominanceGap (15) ≤ lead < 30      → 2-1 split (featured on the outer Mains) + NFL flip
+    //   lead < 15                          → 1-1-1
+    // With 2 Main TVs, 2-1 is disabled (§17.C), so anything below 30 is 1-1.
+    mainTakeoverGap: 30,
     blowoutDemotion: 35,
     completionProtectionMinScore: 55,
     completionProtectionPhase: 0.85,

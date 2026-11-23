@@ -6,8 +6,8 @@ const vm = require("vm");
 
 const root = path.join(__dirname, "..");
 const ctx = vm.createContext({ console, Date, Math });
-for (const f of ["config/venue.js", "config/markets.js", "config/national.js",
-                 "modules/fetcher.js", "modules/scorer.js", "modules/venue.js", "modules/display.js"]) {
+for (const f of ["config/venue.js", "config/markets.js", "config/national.js", "config/live.js",
+                 "modules/fetcher.js", "modules/scorer.js", "modules/venue.js", "modules/eligibility.js", "modules/display.js", "config/zip-markets.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
 }
 const run = code => vm.runInContext(code, ctx);
@@ -213,6 +213,121 @@ h("D4  Flagged (uncertain) teams");
 const flags = run(`Object.entries(MARKETS).flatMap(([id, m]) => (m.flags || []).map(f => ({ market: m.name, team: f.team, issue: f.issue })))`);
 flags.forEach(f => console.log(`  [${f.market}] ${f.team}: ${f.issue}`));
 console.log(`  total: ${flags.length}`);
+
+// ---------- Phase 5 ----------
+h("P5.1 Address → ZIP → market");
+const addr = [
+  ["4723 Bethesda Ave, Bethesda, MD 20814", "20814", "washington-dc"],
+  ["Bethesda MD 20814-1234", "20814", "washington-dc"],
+  ["20814", "20814", "washington-dc"],
+  ["1 Main St, Baltimore 21201", "21201", "baltimore"],
+  ["350 5th Ave New York NY 10118", "10118", "new-york"],
+  ["Huntsville AL 35801", "35801", "nashville"],
+  ["Kingman AZ 86401", "86401", "las-vegas"],
+  ["4723 Bethesda Ave", null, null],
+  ["Anchorage AK 99501", "99501", null]
+];
+for (const [text, zip, market] of addr) {
+  ctx.__t = text;
+  const r = run("marketFromAddress(__t)");
+  check(r.zip === zip && r.marketId === market, `"${text}" → ZIP ${r.zip} → ${r.marketId || r.error}`);
+}
+const covered = run("new Set(Object.values(ZIP_PREFIX_TO_MARKET))");
+const unknown = [...covered].filter(m => !run(`!!MARKETS["${m}"]`));
+check(unknown.length === 0, `every ZIP-mapped market exists (${covered.size} markets reachable by ZIP)`);
+check(run("Object.keys(MARKETS).every(m => Object.values(ZIP_PREFIX_TO_MARKET).includes(m))"), "every market is reachable from at least one ZIP prefix");
+
+h("P5.2 Eligibility tiers");
+run(`var __dc = buildVenue({ marketId: "washington-dc", totalTVs: 5, anchorTVs: [1] });
+  var __g = (o) => ({ id: "t" + Math.random(), sport: "CBB", homeTeam: "A", awayTeam: "B", homeScore: 0, awayScore: 0,
+    gameStatus: "in_progress", gamePhase: 0.5, period: 1, gameClock: "10:00", winProbability: 0.5, ...o });`);
+const tiers = [
+  ["NHL any", `{ sport: "NHL", homeTeam: "Utah Mammoth", awayTeam: "Winnipeg Jets" }`, "eligible"],
+  ["market team", `{ homeTeam: "Maryland Terrapins", awayTeam: "Coppin State Eagles" }`, "eligible"],
+  ["ranked", `{ homeTeam: "X", awayTeam: "Y", awayTeamRank: 12 }`, "eligible"],
+  ["rank 26 is unranked", `{ homeTeam: "X", awayTeam: "Y", awayTeamRank: 26 }`, "excluded"],
+  ["national program", `{ sport: "CFB", homeTeam: "Clemson Tigers", awayTeam: "Furman Paladins" }`, "eligible"],
+  ["Power v Power CBB", `{ homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4" }`, "filler"],
+  ["CFB Big 12 v Big 12 (id 4 = Big 12 in football)", `{ sport: "CFB", homeTeam: "P", awayTeam: "Q", homeConferenceId: "4", awayConferenceId: "4" }`, "filler"],
+  ["CBB WCC v WCC", `{ homeTeam: "P", awayTeam: "Q", homeConferenceId: "29", awayConferenceId: "29" }`, "excluded"],
+  ["Notre Dame counts as Power", `{ sport: "CFB", homeTeam: "Notre Dame Fighting Irish", awayTeam: "Q", homeConferenceId: "18", awayConferenceId: "5" }`, "eligible"],
+  ["Power v Pac-12", `{ homeTeam: "P", awayTeam: "Oregon State Beavers", homeConferenceId: "2", awayConferenceId: "21" }`, "excluded"],
+  ["mid-majors", `{ homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals", homeConferenceId: "14", awayConferenceId: "14" }`, "excluded"],
+  ["non-D1 opponent", `{ homeTeam: "Grambling Tigers", awayTeam: "Ecclesia Royals", homeConferenceId: "26" }`, "excluded"]
+];
+for (const [label, obj, want] of tiers) {
+  const got = run(`classifyGame(__g(${obj}), __dc)`);
+  check(got.tier === want, `${label}: ${got.tier} (${got.tierReason})`);
+}
+// Notre Dame is a national program, so it is eligible before the Power rule applies. Check the Power rule itself:
+check(run(`isPowerTeam("CFB", "Notre Dame Fighting Irish", "18") && !isPowerTeam("CFB", "UConn Huskies", "18")`), "Notre Dame is Power as an independent; UConn is not");
+
+h("P5.3 Watchable now");
+const now = Date.now();
+const wt = [
+  [`{ gameStatus: "in_progress" }`, true, "in progress"],
+  [`{ gameStatus: "scheduled", espnState: "pre", scheduledStartTime: new Date(${now} + 29*60000).toISOString() }`, true, "starts in 29 min"],
+  [`{ gameStatus: "scheduled", espnState: "pre", scheduledStartTime: new Date(${now} + 31*60000).toISOString() }`, false, "starts in 31 min"],
+  [`{ gameStatus: "scheduled", espnState: "pre", scheduledStartTime: new Date(${now} - 5*60000).toISOString() }`, true, "start time passed, not yet live"],
+  [`{ gameStatus: "final" }`, false, "final"]
+];
+for (const [obj, want, label] of wt) check(run(`isWatchableNow(__g(${obj}), new Date(${now}))`) === want, `${label} → ${want ? "watchable" : "not watchable"}`);
+
+h("P5.4 Filling TVs");
+run(`var __pro = (id, sport, home, away, wp) => __g({ id, sport, homeTeam: home, awayTeam: away, winProbability: wp });`);
+const rep = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 8, anchorTVs: [1, 2] });
+  const games = [__pro("a", "NBA", "Boston Celtics", "Miami Heat", 0.5), __pro("b", "NHL", "Dallas Stars", "Seattle Kraken", 0.7),
+                 __g({ id: "f", homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4" }),
+                 __g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })];
+  const a = runAssignmentCycle(games, v);
+  const order = v.tvs.map(tv => (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id]?.id || "-");
+  return { order, repeats: Object.keys(a.repeatMap).length, pool: a.poolTier, fb: Object.keys(a.fallbackChannels).length };
+})()`);
+console.log(`  8 TVs, 2 eligible + 1 filler + 1 excluded → ${rep.order.join(" ")} (repeats ${rep.repeats})`);
+check(rep.pool === "eligible" && !rep.order.includes("f") && !rep.order.includes("x"), "filler and excluded unused while eligible games are watchable");
+check(rep.order.every(x => x === "a" || x === "b") && rep.fb === 0, "empty TVs repeat eligible games; no fallback channels");
+const counts = rep.order.reduce((m, x) => (m[x] = (m[x] || 0) + 1, m), {});
+check(Math.abs(counts.a - counts.b) <= 1, `repeats are spread (a ${counts.a}, b ${counts.b})`);
+
+const fil = run(`(() => {
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);          // fixed clock: "later today" is well defined
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 4, anchorTVs: [1] });
+  const at = h => new Date(noon.getTime() + h * 3600000).toISOString();
+  const later = (id, h, sport, home, away) => ({ ...__pro(id, sport, home, away, 0.5), gameStatus: "scheduled", espnState: "pre", scheduledStartTime: at(h) });
+  const games = [__g({ id: "f", homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4" }),
+                 __g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" }),
+                 later("n3", 3, "NBA", "Boston Celtics", "Miami Heat"), later("n1", 1, "NHL", "Dallas Stars", "Seattle Kraken"),
+                 later("n2", 2, "NBA", "Utah Jazz", "LA Clippers"), later("n4", 4, "NFL", "Detroit Lions", "Chicago Bears"),
+                 later("n5", 5, "MLB", "Texas Rangers", "Houston Astros"), later("n6", 6, "NHL", "Boston Bruins", "Buffalo Sabres"),
+                 later("tomorrow", 14, "NBA", "Phoenix Suns", "Denver Nuggets"),
+                 later("cmd", 8, "NFL", "Washington Commanders", "Cincinnati Bengals"),
+                 { ...__g({ id: "xl", homeTeam: "Akron Zips", awayTeam: "Kent State Golden Flashes" }), gameStatus: "scheduled", espnState: "pre", scheduledStartTime: at(2) }];
+  const a = runAssignmentCycle(games, v, createAnchorHistory(), noon);
+  const ids = v.tvs.map(tv => (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id]?.id || "-");
+  return { ids, pool: a.poolTier, upNext: a.upNext.map(g => g.id) };
+})()`);
+check(fil.pool === "filler" && fil.ids.every(i => i === "f"), `no eligible game watchable → filler fills the TVs (${fil.ids.join(" ")})`);
+check(!fil.ids.some(i => /^n|^x/.test(i)), "later eligible games and excluded games stay off the TVs");
+check(fil.upNext.length === 5 && fil.upNext.includes("cmd"), `Up next keeps the 5 most relevant later games, incl. the 8h-away Commanders game (${fil.upNext.join(", ")})`);
+check(fil.upNext.every(i => /^(n\d|cmd)$/.test(i)), "Up next has no tomorrow, filler or excluded games");
+check(fil.upNext.indexOf("cmd") === 4, "Up next is listed in start-time order (Commanders, latest, is last)");
+
+const fb = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 3, anchorTVs: [1] });
+  const a = runAssignmentCycle([__g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })], v);
+  return { pool: a.poolTier, fb: Object.values(a.fallbackChannels) };
+})()`);
+check(fb.pool === "none" && fb.fb.length === 3, `nothing eligible/filler watchable → fallback channels on all TVs (${fb.fb.join(", ")})`);
+
+const one = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 1 });
+  const a = runAssignmentCycle(generateMockGames("tuesday").games, v);
+  return { n: v.tvs.length, A: v.anchors.length, g: a.anchors[v.anchors[0].id]?.homeTeam };
+})()`);
+check(one.n === 1 && one.A === 1 && one.g === "Washington Commanders", `1-TV venue: 1 main TV showing ${one.g}`);
+const five = run(`buildVenue({ marketId: "washington-dc", totalTVs: 5 })`);
+check(five.anchors.length === 1 && five.secondaries.length === 4, "5 TVs → 1 main + 4 others (clamp(round(5 × 0.25), 1, 4))");
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures ? 1 : 0);

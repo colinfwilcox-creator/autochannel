@@ -17,7 +17,8 @@ const LIVE_LEAGUES = [
   { sport: "CBB", path: "basketball/mens-college-basketball", params: { groups: "50", limit: "300" } }
 ];
 
-// Which live games reach the dashboard: everything in progress, plus games that
-// start within this many hours. Finals, postponed and canceled games are dropped.
-const LIVE_UPCOMING_WINDOW_HOURS = 12;
+// Which live games are kept: everything in progress, plus games that start within
+// this many hours (TVs only take games starting within 30 min; the rest feed
+// "Up next"). Finals, postponed and canceled games are dropped.
+const LIVE_UPCOMING_WINDOW_HOURS = 24;
 const LIVE_FETCH_TIMEOUT_MS = 15000;

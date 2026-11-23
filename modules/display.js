@@ -235,24 +235,77 @@ function createTVAssignments(scoredGames, lockResult, venue, history = createAnc
   };
 }
 
-// Runs the full cycle for a set of games and a venue.
+// Fill TVs still empty after normal assignment by repeating the pool's best games,
+// spread out: #1 gets the first extra TV, then #2, and so on (Phase 5 §5.3).
+// The primary lock game's share is set by saturation, so it is not repeated —
+// unless it is the only game in the pool.
+function fillRepeats(a, venue) {
+  a.repeatMap = {};
+  const lockId = a.lockGame ? a.lockGame.id : null;
+  let ranking = a.allGames
+    .filter(g => !INACTIVE_STATUSES.has(g.gameStatus))
+    .sort((x, y) => y.channelScore - x.channelScore);
+  const withoutLock = ranking.filter(g => g.id !== lockId);
+  if (withoutLock.length) ranking = withoutLock;
+  if (!ranking.length) return;
+  let next = 0;
+  for (const tv of venue.tvs) {
+    const map = tv.role === "anchor" ? a.anchors : a.secondaries;
+    if (map[tv.id]) continue;
+    // Anchors never take a demoted game.
+    const options = tv.role === "anchor" ? ranking.filter(g => g.anchorState !== "demoted") : ranking;
+    if (!options.length) continue;
+    const pick = options[next % options.length];
+    next++;
+    map[tv.id] = pick;
+    a.repeatMap[tv.id] = true;
+  }
+}
+
+// Full cycle (Phase 5): classify → watchable now → pool (eligible, else filler)
+// → locks (identity) → score → assign → repeats → fallback channels.
 // `history` (from createAnchorHistory) carries anchor/demotion state between cycles.
-function runAssignmentCycle(games, venue, history = createAnchorHistory()) {
-  const lockResult = resolveLocks(games, venue);        // before scoring, by identity
-  const scored = scoreGames(games, venue);
+function runAssignmentCycle(games, venue, history = createAnchorHistory(), now = new Date()) {
+  const classified = games.map(g => ({ ...g, ...classifyGame(g, venue), watchableNow: isWatchableNow(g, now) }));
+  const eligibleNow = classified.filter(g => g.tier === "eligible" && g.watchableNow);
+  const fillerNow = classified.filter(g => g.tier === "filler" && g.watchableNow);
+  const pool = eligibleNow.length ? eligibleNow : fillerNow;
+
+  const lockResult = resolveLocks(pool, venue);        // before scoring, by identity
+  const scored = scoreGames(pool, venue);
   const assignments = createTVAssignments(scored, lockResult, venue, history);
+  fillRepeats(assignments, venue);
   assignments.fallbackChannels = assignFallbackChannels(assignments, venue);
+  assignments.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
+
+  // Everything, for the details view. Excluded games are never scored.
+  const inPool = new Map(assignments.allGames.map(g => [g.id, g]));
+  const notInPool = scoreGames(classified.filter(g => g.tier !== "excluded" && !inPool.has(g.id)), venue);
+  const scoredOthers = new Map(notInPool.map(g => [g.id, g]));
+  assignments.catalog = classified.map(g => inPool.get(g.id) || scoredOthers.get(g.id) || g);
+  assignments.tierCounts = { eligible: 0, filler: 0, excluded: 0 };
+  classified.forEach(g => { assignments.tierCounts[g.tier]++; });
+  // Up next: the 5 most relevant eligible games starting later today, shown in start order.
+  // (Picking by start time alone let five early generic games push out e.g. a Commanders game.)
+  const byStart = (x, y) => new Date(x.scheduledStartTime) - new Date(y.scheduledStartTime);
+  assignments.upNext = assignments.catalog
+    .filter(g => g.tier === "eligible" && isLaterToday(g, now))
+    .sort((x, y) => (y.channelScore - x.channelScore) || byStart(x, y))
+    .slice(0, 5)
+    .sort(byStart);
   return assignments;
 }
 
+// Fallback channels go on TVs that are still empty, which after repeats means
+// nothing eligible or filler is watchable.
 function assignFallbackChannels(assignments, venue) {
-  const emptySlots = Object.entries(assignments.secondaries)
-    .filter(([, game]) => game === null)
-    .map(([tvId]) => tvId);
   const fallbackMap = {};
-  emptySlots.forEach((tvId, index) => {
-    fallbackMap[tvId] = venue.fallbackChannels[index % venue.fallbackChannels.length];
-  });
+  let i = 0;
+  for (const tv of venue.tvs) {
+    const map = tv.role === "anchor" ? assignments.anchors : assignments.secondaries;
+    if (map[tv.id]) continue;
+    fallbackMap[tv.id] = venue.fallbackChannels[i++ % venue.fallbackChannels.length];
+  }
   return fallbackMap;
 }
 

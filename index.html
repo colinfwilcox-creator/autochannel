@@ -12,7 +12,7 @@
     // │ Bump it in every commit that changes index.html, app.js, styles.css, │
     // │ config/*.js or modules/*.js. Format: YYYY.MM.DD-N. See README.       │
     // └─────────────────────────────────────────────────────────────────────┘
-    window.APP_VERSION = "2026.11.23-1";
+    window.APP_VERSION = "2026.11.23-2";
 
     // Every stylesheet and script is requested as file?v=APP_VERSION, so a new
     // version is a new URL and browsers can't serve the old file from cache.
@@ -28,22 +28,41 @@
   </script>
 </head>
 <body>
-  <header>
-    <div class="header-content">
-      <h1>🏈 AutoChannel Dashboard</h1>
-      <p id="status" class="status-line">Initializing...</p>
-    </div>
-    <div class="venue-info">
-      <span class="venue-name" id="venue-name">Barking Dog, Bethesda MD</span>
-      <span class="refresh-indicator" id="source-indicator">Loading…</span>
-    </div>
+  <header class="simple-header">
+    <h1>📺 AutoChannel</h1>
+    <p id="status" class="status-line">Loading…</p>
   </header>
 
   <main>
     <div id="error-banner" class="error-banner" role="alert" hidden></div>
-    <div id="dashboard" class="dashboard">
-      <p>Loading...</p>
-    </div>
+
+    <section id="simple-view" class="simple-view">
+      <form id="simple-form" class="simple-form" autocomplete="on">
+        <label class="field field-address">
+          <span>Address</span>
+          <input id="address" type="text" inputmode="text" autocomplete="street-address" placeholder="Street, city, ZIP">
+        </label>
+        <label class="field field-count">
+          <span>TVs</span>
+          <input id="tv-count" type="number" min="1" max="20" step="1" value="5" inputmode="numeric">
+        </label>
+      </form>
+      <p id="address-message" class="address-message" hidden></p>
+
+      <ol id="tv-list" class="tv-list" aria-label="What to put on each TV"></ol>
+      <p id="simple-empty" class="empty-state" hidden></p>
+
+      <section id="up-next" class="up-next" hidden>
+        <h2>Up next</h2>
+        <ul id="up-next-list"></ul>
+      </section>
+    </section>
+
+    <button id="details-toggle" type="button" class="details-toggle" aria-expanded="false" aria-controls="details-view">Show details</button>
+
+    <section id="details-view" class="details-view" hidden>
+      <div id="dashboard" class="dashboard"></div>
+    </section>
   </main>
 
   <footer class="app-footer">AutoChannel build <span id="app-version"></span></footer>
@@ -59,9 +78,11 @@
       "config/national.js",
       "config/sports.js",
       "config/live.js",
+      "config/zip-markets.js",
       "modules/fetcher.js",
       "modules/scorer.js",
       "modules/venue.js",
+      "modules/eligibility.js",
       "modules/display.js",
       "app.js"
     ].forEach(function (src) {

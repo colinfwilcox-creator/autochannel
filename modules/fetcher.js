@@ -34,6 +34,38 @@ function formatGameClock(game) {
   return game.gameClock;
 }
 
+// Short team name for the compact rows ("Commanders", "Ohio State").
+function shortTeamName(game, side) {
+  const short = side === "home" ? game.homeShort : game.awayShort;
+  if (short) return short;
+  const full = side === "home" ? game.homeTeam : game.awayTeam;
+  const words = String(full).split(" ");
+  return words.length > 1 ? words[words.length - 1] : full;
+}
+
+// Compact clock for the simple screen: "Q2 4:12", "P3 8:01", "H2 3:41", "Top 7th", "Half".
+function formatCompactClock(game) {
+  const s = game.gameStatus;
+  if (s === "halftime") return "Half";
+  if (game.sport === "MLB") {
+    const half = { top: "Top", bottom: "Bot", middle: "Mid", end: "End" }[game.inningHalf];
+    if (half && game.period) return `${half} ${ordinal(game.period)}`;
+    return game.statusDetail || (game.period ? ordinal(game.period) : "");
+  }
+  const prefix = { NFL: "Q", CFB: "Q", NBA: "Q", CBB: "H", NHL: "P" }[game.sport] || "";
+  const reg = { NFL: 4, CFB: 4, NBA: 4, CBB: 2, NHL: 3 }[game.sport];
+  const p = game.period;
+  if (!p) return game.statusDetail || "";
+  const label = reg && p > reg ? (p - reg > 1 ? `${p - reg}OT` : "OT") : `${prefix}${p}`;
+  if (s === "end_period") return `End ${label}`;
+  return game.gameClock && game.gameClock !== "0:00" ? `${label} ${game.gameClock}` : label;
+}
+
+function formatStartTime(game) {
+  if (!game.scheduledStartTime) return "";
+  return new Date(game.scheduledStartTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 // ---------- ESPN normalization ----------
 
 // Regulation length per sport: periods and minutes per period.
@@ -163,6 +195,10 @@ function normalizeEspnEvent(event, sport) {
       sport,
       homeTeam: homeName,
       awayTeam: awayName,
+      homeShort: home.team.shortDisplayName || homeName,
+      awayShort: away.team.shortDisplayName || awayName,
+      homeConferenceId: home.team.conferenceId != null ? String(home.team.conferenceId) : null,
+      awayConferenceId: away.team.conferenceId != null ? String(away.team.conferenceId) : null,
       homeTeamRank: rankOf(home),
       awayTeamRank: rankOf(away),
       homeScore: parseScore(home),
@@ -381,6 +417,10 @@ function generateMockGames(scenario = "tuesday") {
       sport: "CFB",
       homeTeam: "Ohio State Buckeyes",
       awayTeam: "Michigan State Spartans",
+      homeShort: "Ohio State",
+      awayShort: "Michigan St",
+      homeConferenceId: "5",
+      awayConferenceId: "5",
       homeTeamRank: 4,
       awayTeamRank: 18,
       homeScore: 28,
@@ -402,6 +442,10 @@ function generateMockGames(scenario = "tuesday") {
       sport: "CBB",
       homeTeam: "Georgetown Hoyas",
       awayTeam: "Villanova Wildcats",
+      homeShort: "Georgetown",
+      awayShort: "Villanova",
+      homeConferenceId: "4",
+      awayConferenceId: "4",
       homeTeamRank: null,
       awayTeamRank: null,
       homeScore: 52,

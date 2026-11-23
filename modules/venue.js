@@ -7,6 +7,8 @@ const LOCK_PLAYOFF_SAT = 0.60;
 const LOCK_EVENT_SAT = 1.0;
 const LOCK_EVENTS = ["Super Bowl", "World Cup Final"];
 
+const MAX_TVS = 20;
+
 function clamp(x, lo, hi) { return Math.min(Math.max(x, lo), hi); }
 
 function defaultAnchorCount(totalTVs) {
@@ -57,11 +59,12 @@ function generateLockList(market) {
 }
 
 function normalizeSetup(setup) {
-  const totalTVs = Math.max(2, Math.floor(Number(setup.totalTVs) || 2));
+  const totalTVs = Math.min(MAX_TVS, Math.max(1, Math.floor(Number(setup.totalTVs) || 1)));
   let anchorTVs = [...new Set((setup.anchorTVs || []).map(Number))]
     .filter(n => n >= 1 && n <= totalTVs)
     .sort((a, b) => a - b);
-  if (anchorTVs.length < 1 || anchorTVs.length >= totalTVs) {
+  // 1 ≤ A < N, except a single-TV venue where the one TV is the main TV.
+  if (anchorTVs.length < 1 || (totalTVs > 1 && anchorTVs.length >= totalTVs)) {
     const a = defaultAnchorCount(totalTVs);
     anchorTVs = Array.from({ length: a }, (_, i) => i + 1);
   }

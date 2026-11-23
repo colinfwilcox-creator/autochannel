@@ -9,7 +9,7 @@ const root = path.join(__dirname, "..");
 const marketId = process.argv[2] || "washington-dc";
 const ctx = vm.createContext({ console, Date, Math, URL, Intl, fetch, AbortController, setTimeout, clearTimeout });
 for (const f of ["config/venue.js", "config/markets.js", "config/national.js", "config/live.js",
-                 "modules/fetcher.js", "modules/scorer.js", "modules/venue.js", "modules/display.js"]) {
+                 "modules/fetcher.js", "modules/scorer.js", "modules/venue.js", "modules/eligibility.js", "modules/display.js", "config/zip-markets.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
 }
 const run = code => vm.runInContext(code, ctx);

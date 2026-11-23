@@ -14,11 +14,12 @@
     </div>
     <div class="venue-info">
       <span class="venue-name" id="venue-name">Barking Dog, Bethesda MD</span>
-      <span class="refresh-indicator">Live • Updates every 60s</span>
+      <span class="refresh-indicator" id="source-indicator">Loading…</span>
     </div>
   </header>
 
   <main>
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
     <div id="dashboard" class="dashboard">
       <p>Loading...</p>
     </div>
@@ -29,6 +30,7 @@
   <script src="config/markets.js"></script>
   <script src="config/national.js"></script>
   <script src="config/sports.js"></script>
+  <script src="config/live.js"></script>
 
   <!-- Load modules -->
   <script src="modules/fetcher.js"></script>

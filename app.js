@@ -2,11 +2,15 @@
 // Venue setup → fetch → resolve locks → score → assign → render.
 
 const SETUP_STORAGE_KEY = "autochannel.setup.v3";
+const MODE_STORAGE_KEY = "autochannel.dataMode";
 
 let setup = loadSetup();
 let venue = buildVenue(setup);
 let scenario = "tuesday";
-let gameData = null;
+let dataMode = loadDataMode();   // "live" | "mock"
+let gameData = null;             // last good data for the current mode only
+let liveIssue = null;
+let anchorHistory = createAnchorHistory(); // anchor / demotion memory across refreshes            // { message, at } when the latest live fetch failed fully or partly
 let assignments = null;
 let lastUpdateTime = null;
 let isLoading = false;
@@ -27,6 +31,29 @@ function loadSetup() {
     }
   } catch (e) { /* storage unavailable */ }
   return presetSetup("barking-dog");
+}
+
+function loadDataMode() {
+  if (!PROXY_BASE_URL) return "mock";
+  try {
+    const m = localStorage.getItem(MODE_STORAGE_KEY);
+    if (m === "live" || m === "mock") return m;
+  } catch (e) { /* storage unavailable */ }
+  return "live";
+}
+
+function setDataMode(mode) {
+  if (mode === dataMode || (mode === "live" && !PROXY_BASE_URL)) return;
+  dataMode = mode;
+  try { localStorage.setItem(MODE_STORAGE_KEY, mode); } catch (e) { /* ignore */ }
+  // Never carry data across modes: switching to live must not leave mock games on screen.
+  gameData = null;
+  assignments = null;
+  liveIssue = null;
+  gameToggleState = {};
+  anchorHistory = createAnchorHistory();
+  displayDashboard();
+  fetchAndUpdate();
 }
 
 function saveSetup() {
@@ -51,16 +78,31 @@ function applySetup(changes, keepPreset = false) {
 async function fetchAndUpdate() {
   if (isLoading) return;
   isLoading = true;
-  updateStatus("Fetching and scoring...");
+  const mode = dataMode;
+  updateStatus(mode === "live" ? "Fetching live scoreboards..." : "Loading mock data...");
   try {
-    gameData = await fetchGames(scenario);
+    const data = await fetchGames(scenario, mode);
+    if (mode !== dataMode) return; // mode changed mid-fetch
+    gameData = data;
+    const stale = (data.leagues || []).filter(l => l.stale);
+    liveIssue = data.errors && data.errors.length
+      ? {
+          message: `Live fetch failed for ${data.errors.map(e => `${e.sport} (${e.message})`).join(", ")}.`,
+          partial: stale.length < (data.leagues || []).length,
+          staleSince: stale.length ? new Date(Math.min(...stale.map(l => new Date(l.fetchedAt).getTime()))) : null,
+          at: new Date()
+        }
+      : null;
     gameData.games.forEach(g => {
       if (!(g.id in gameToggleState)) gameToggleState[g.id] = true;
     });
     reAssignWithCurrentGames();
   } catch (err) {
     console.error("Update error:", err);
-    updateStatus(`Error: ${err.message}`);
+    if (mode !== dataMode) return;
+    // Keep the last good data on screen (if any) and say so. No mock fallback.
+    liveIssue = { message: `Live fetch failed: ${err.message}.`, partial: false, at: new Date() };
+    displayDashboard();
   } finally {
     isLoading = false;
   }
@@ -69,7 +111,7 @@ async function fetchAndUpdate() {
 function reAssignWithCurrentGames() {
   if (!gameData) return;
   const activeGames = gameData.games.filter(g => gameToggleState[g.id] !== false);
-  assignments = runAssignmentCycle(activeGames, venue);
+  assignments = runAssignmentCycle(activeGames, venue, anchorHistory);
   // Scores for the toggle panel, including games switched off.
   assignments.allGamesWithToggle = scoreGames(gameData.games, venue);
   lastUpdateTime = new Date();
@@ -83,15 +125,55 @@ function toggleGame(gameId) {
 
 // ---------- Rendering ----------
 
+function renderBanner() {
+  const banner = document.getElementById("error-banner");
+  if (!banner) return;
+  if (dataMode !== "live" || !liveIssue) {
+    banner.hidden = true;
+    banner.textContent = "";
+    return;
+  }
+  const since = liveIssue.staleSince || (gameData && !liveIssue.partial ? new Date(gameData.timestamp) : null);
+  let kept;
+  if (!gameData) kept = " No live data has loaded yet, so the TVs are empty.";
+  else if (since) kept = ` Showing the last good data${liveIssue.partial ? " for those leagues" : ""} from ${since.toLocaleTimeString()}.`;
+  else kept = " Those leagues are missing from the TVs until the next good fetch.";
+  banner.hidden = false;
+  banner.textContent = `⚠ ${liveIssue.message}${kept} Retrying every 60s.`;
+}
+
+function renderSourceIndicator() {
+  const el = document.getElementById("source-indicator");
+  if (!el) return;
+  if (dataMode === "live") {
+    el.textContent = liveIssue && !liveIssue.partial ? "LIVE • fetch failing" : "LIVE • ESPN • every 60s";
+    el.className = `refresh-indicator ${liveIssue ? "is-warning" : ""}`;
+  } else {
+    el.textContent = `MOCK DATA • ${MOCK_SCENARIOS[scenario]}`;
+    el.className = "refresh-indicator is-mock";
+  }
+}
+
 function displayDashboard() {
   const dashboard = document.getElementById("dashboard");
+  renderBanner();
+  renderSourceIndicator();
   if (!assignments) {
-    dashboard.innerHTML = "<p>No data yet</p>";
+    const wasOpen = document.getElementById("setup-panel")?.open || false;
+    dashboard.innerHTML = "";
+    dashboard.appendChild(createSetupPanel(wasOpen));
+    const p = document.createElement("p");
+    p.className = "empty-state";
+    p.textContent = dataMode === "live"
+      ? (liveIssue ? "No live data yet." : "Loading live scoreboards…")
+      : "Loading…";
+    dashboard.appendChild(p);
     return;
   }
 
   const activeGameCount = Object.values(gameToggleState).filter(v => v !== false).length;
-  updateStatus(`${activeGameCount} active games at ${lastUpdateTime.toLocaleTimeString()}`);
+  const noun = dataMode === "live" ? "live/upcoming games" : "active games";
+  updateStatus(`${activeGameCount} ${noun} · updated ${lastUpdateTime.toLocaleTimeString()}`);
   document.getElementById("venue-name").textContent =
     `${venue.venueName} · ${venue.marketName} · ${venue.tvs.length} TVs (${venue.anchors.length} anchor / ${venue.secondaries.length} secondary)`;
 
@@ -177,6 +259,17 @@ function createSetupPanel(open) {
   const presetOptions = Object.entries(VENUE_PRESETS)
     .map(([id, p]) => `<option value="${id}" ${setup.preset === id ? "selected" : ""}>${escapeHtml(p.venueName)}</option>`)
     .join("") + `<option value="custom" ${setup.preset === "custom" ? "selected" : ""}>Custom</option>`;
+  const modeDisabled = !PROXY_BASE_URL;
+  const modeControl = `
+    <div class="mode-toggle" role="group" aria-label="Data source">
+      <button type="button" data-mode="live" class="${dataMode === "live" ? "is-on" : ""}" ${modeDisabled ? "disabled" : ""} aria-pressed="${dataMode === "live"}">Live</button>
+      <button type="button" data-mode="mock" class="${dataMode === "mock" ? "is-on" : ""}" aria-pressed="${dataMode === "mock"}">Mock</button>
+    </div>
+    ${modeDisabled ? `<span class="setup-hint">Live needs PROXY_BASE_URL in config/live.js</span>` : ""}`;
+  const feedRows = dataMode === "live" && gameData && gameData.leagues
+    ? gameData.leagues.map(l => `<li><span>${l.sport}${l.stale ? " (stale)" : ""}</span><span>${l.returned} returned · ${l.games.length} live/upcoming${l.failures.length ? ` · <strong>${l.failures.length} failed</strong>` : ""}</span></li>`).join("") +
+      (gameData.errors || []).filter(e => !gameData.leagues.some(l => l.sport === e.sport)).map(e => `<li><span>${e.sport}</span><span><strong>error:</strong> ${escapeHtml(e.message)}</span></li>`).join("")
+    : "";
   const scenarioOptions = Object.entries(MOCK_SCENARIOS)
     .map(([id, label]) => `<option value="${id}" ${scenario === id ? "selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
@@ -211,7 +304,12 @@ function createSetupPanel(open) {
       <label>Preset <select id="setup-preset">${presetOptions}</select></label>
       <label>Market <select id="setup-market">${marketOptions}</select></label>
       <label>Total TVs <input id="setup-total" type="number" min="2" max="40" value="${venue.tvs.length}"></label>
-      <label>Mock data <select id="setup-scenario">${scenarioOptions}</select></label>
+      <label>Mock scenario <select id="setup-scenario" ${dataMode === "live" ? "disabled" : ""}>${scenarioOptions}</select></label>
+    </div>
+    <div class="setup-block">
+      <div class="setup-label">Data source</div>
+      ${modeControl}
+      ${feedRows ? `<ul class="team-table feed-status">${feedRows}</ul>` : ""}
     </div>
     <div class="setup-block">
       <div class="setup-label">Anchor TVs: tap to mark (${A} of ${venue.tvs.length}, default ${defaultA})
@@ -247,9 +345,12 @@ function createSetupPanel(open) {
     const a = defaultAnchorCount(n);
     applySetup({ totalTVs: n, anchorTVs: Array.from({ length: a }, (_, i) => i + 1), diehardTV: null });
   });
+  panel.querySelectorAll(".mode-toggle button").forEach(b =>
+    b.addEventListener("click", () => setDataMode(b.dataset.mode)));
   panel.querySelector("#setup-scenario").addEventListener("change", e => {
     scenario = e.target.value;
     gameToggleState = {};
+    anchorHistory = createAnchorHistory();
     fetchAndUpdate();
   });
   panel.querySelector("#setup-default-anchors").addEventListener("click", () => {
@@ -372,6 +473,7 @@ function updateStatus(text) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  displayDashboard();
   fetchAndUpdate();
   setInterval(fetchAndUpdate, 60000);
 });

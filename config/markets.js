@@ -372,7 +372,7 @@ const MARKETS = {
     regional: [],
     flags: [
       { team: "Anaheim Ducks / Los Angeles Angels", issue: "Orange County teams listed as home for all of LA." },
-      { team: "LAFC / LA Clippers", issue: "Exact ESPN displayName unverified." },
+      { team: "LAFC", issue: "Exact ESPN displayName unverified (the proxy has no MLS route)." },
       { team: "Los Angeles Rams / Los Angeles Chargers", issue: "Both get any_game locks. The Rams win if both play at once." }
     ]
   },
@@ -454,7 +454,7 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
-      { team: "Utah Mammoth", issue: "Team renamed in 2025. ESPN displayName unverified. As the highest-base home team it gets the any_game lock, though the Jazz may be the bigger draw." },
+      { team: "Utah Mammoth", issue: "As the highest-base home team it gets the any_game lock, though the Jazz may be the bigger draw. (ESPN name verified live.)" },
       { team: "BYU Cougars", issue: "Listed as a second flagship. Unsure." }
     ]
   },

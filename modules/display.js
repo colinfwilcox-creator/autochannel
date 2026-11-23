@@ -62,14 +62,23 @@ function computeSaturationCount(S, eligible, sat) {
 
 // ---------- Anchor state ----------
 
-function getAnchorState(game, venue, lockedIds) {
+// Anchor history across refresh cycles (§7, §8.5). Only a game that held an anchor
+// while Active can be demoted, and demotion is one-way for the rest of that game.
+function createAnchorHistory() {
+  return { anchored: new Set(), demoted: new Set() };
+}
+
+function getAnchorState(game, venue, lockedIds, history) {
   if (!game) return null;
   const t = venue.thresholds;
   if (game.gameStatus === "final") return "finished";
   const isLocked = lockedIds && lockedIds.has(game.id);
   // Blowout demotion overrides completion protection (§7) — but lock games are
   // identity-based and are never demoted by ChannelScore (§6.1, §17.A.1).
-  if (!isLocked && game.channelScore < t.blowoutDemotion) return "demoted";
+  if (!isLocked && history) {
+    if (history.demoted.has(game.id)) return "demoted";
+    if (history.anchored.has(game.id) && game.channelScore < t.blowoutDemotion) return "demoted";
+  }
   if (game.gamePhase > t.completionProtectionPhase && game.channelScore >= t.completionProtectionMinScore) {
     return "protected";
   }
@@ -117,12 +126,13 @@ function assignAnchors(candidates, venue) {
   return { assignments: out, mode: anchors.map(() => "1").join("-") };
 }
 
-function createTVAssignments(scoredGames, lockResult, venue) {
+function createTVAssignments(scoredGames, lockResult, venue, history = createAnchorHistory()) {
   const lockedIds = new Set();
   if (lockResult.primary) lockedIds.add(lockResult.primary.game.id);
   lockResult.others.forEach(m => lockedIds.add(m.game.id));
 
-  const games = scoredGames.map(g => ({ ...g, anchorState: getAnchorState(g, venue, lockedIds) }));
+  const games = scoredGames.map(g => ({ ...g, anchorState: getAnchorState(g, venue, lockedIds, history) }));
+  games.filter(g => g.anchorState === "demoted").forEach(g => history.demoted.add(g.id));
   const byId = Object.fromEntries(games.map(g => [g.id, g]));
   const byScore = [...games]
     .filter(g => !INACTIVE_STATUSES.has(g.gameStatus))
@@ -143,6 +153,10 @@ function createTVAssignments(scoredGames, lockResult, venue) {
     anchorResult = assignAnchors(candidates, venue);
   }
   const onAnchor = new Set(Object.values(anchorResult.assignments).filter(Boolean).map(g => g.id));
+  // Record games that hold an anchor while Active, so a later blowout can demote them.
+  Object.values(anchorResult.assignments).forEach(g => {
+    if (g && !lockedIds.has(g.id) && g.channelScore >= venue.thresholds.blowoutDemotion) history.anchored.add(g.id);
+  });
 
   // --- Secondaries ---
   const secs = venue.secondaries;
@@ -222,10 +236,11 @@ function createTVAssignments(scoredGames, lockResult, venue) {
 }
 
 // Runs the full cycle for a set of games and a venue.
-function runAssignmentCycle(games, venue) {
+// `history` (from createAnchorHistory) carries anchor/demotion state between cycles.
+function runAssignmentCycle(games, venue, history = createAnchorHistory()) {
   const lockResult = resolveLocks(games, venue);        // before scoring, by identity
   const scored = scoreGames(games, venue);
-  const assignments = createTVAssignments(scored, lockResult, venue);
+  const assignments = createTVAssignments(scored, lockResult, venue, history);
   assignments.fallbackChannels = assignFallbackChannels(assignments, venue);
   return assignments;
 }

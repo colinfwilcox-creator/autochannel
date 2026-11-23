@@ -1,59 +1,8 @@
-// Phase 1: Data fetcher
-// Fetches live games from ESPN and normalizes to game object shape
+// Data fetcher
+// Live: ESPN scoreboards through the Cloudflare Worker proxy (config/live.js).
+// Mock: scenario presets below. Live never falls back to mock silently.
 
-const ENDPOINTS = {
-  NFL: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
-  NHL: "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard",
-  MLB: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
-  NBA: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
-  CFB: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
-  CBB: "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
-};
-
-const SPORT_MAP = {
-  "football/nfl": "NFL",
-  "hockey/nhl": "NHL",
-  "baseball/mlb": "MLB",
-  "basketball/nba": "NBA",
-  "football/college-football": "CFB",
-  "basketball/mens-college-basketball": "CBB"
-};
-
-function calculateGamePhase(game, sport) {
-  if (game.status === "pre" || game.status === "scheduled") {
-    return 0;
-  }
-  if (game.status === "final" || game.status === "completed") {
-    return 1.0;
-  }
-
-  const clockStr = game.clock || "0:00";
-  const period = game.period || 0;
-
-  // Parse MM:SS from clock string
-  const [minutes, seconds] = clockStr.split(":").map(Number);
-  const totalSecondsRemaining = (minutes || 0) * 60 + (seconds || 0);
-  const minutesRemaining = totalSecondsRemaining / 60;
-
-  let gamePhase = 0;
-
-  if (sport === "NFL" || sport === "CFB") {
-    // 4 quarters × 15 minutes = 60 minutes total
-    gamePhase = ((period - 1) * 15 + (15 - minutesRemaining)) / 60;
-  } else if (sport === "NHL") {
-    // 3 periods × 20 minutes = 60 minutes total
-    gamePhase = ((period - 1) * 20 + (20 - minutesRemaining)) / 60;
-  } else if (sport === "NBA") {
-    // 4 quarters × 12 minutes = 48 minutes total
-    gamePhase = ((period - 1) * 12 + (12 - minutesRemaining)) / 48;
-  } else if (sport === "MLB") {
-    // 9 innings
-    const inning = period || 1;
-    gamePhase = (inning - 1) / 9;
-  }
-
-  return Math.min(Math.max(gamePhase, 0), 1.0);
-}
+// ---------- Display helpers ----------
 
 function parseInningHalf(detail) {
   if (!detail) return null;
@@ -73,6 +22,11 @@ function ordinal(n) {
 
 // Clock text for the TV card. MLB shows the inning instead of a clock (§17.A.5).
 function formatGameClock(game) {
+  if (game.gameStatus === "scheduled" || game.gameStatus === "pre_game") {
+    if (!game.scheduledStartTime) return "Scheduled";
+    return new Date(game.scheduledStartTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (game.statusDetail) return game.statusDetail; // live ESPN text: "4:22 - 3rd", "Halftime", "Top 7th"
   if (game.sport === "MLB") {
     const half = { top: "Top", bottom: "Bot", middle: "Mid", end: "End" }[game.inningHalf] || "Inning";
     return game.period ? `${half} ${ordinal(game.period)}` : "—";
@@ -80,79 +34,251 @@ function formatGameClock(game) {
   return game.gameClock;
 }
 
-function normalizeGame(espnGame, sport) {
-  const homeTeam = espnGame.competitors?.find(c => c.homeAway === "home");
-  const awayTeam = espnGame.competitors?.find(c => c.homeAway === "away");
+// ---------- ESPN normalization ----------
 
-  const gameStatus = espnGame.status?.type?.name || "unknown";
-  const statusMap = {
-    "STATUS_SCHEDULED": "scheduled",
-    "STATUS_PRE": "pre_game",
-    "STATUS_IN_PROGRESS": "in_progress",
-    "STATUS_HALFTIME": "halftime",
-    "STATUS_END_PERIOD": "end_period",
-    "STATUS_FINAL": "final",
-    "STATUS_FINAL_CONFIRMED": "final",
-    "STATUS_FORFEIT": "final",
-    "STATUS_POSTPONED": "postponed",
-    "STATUS_CANCELED": "canceled",
-    "STATUS_DELAYED": "delayed",
-    "STATUS_SUSPENSION": "delayed"
-  };
+// Regulation length per sport: periods and minutes per period.
+const REGULATION = {
+  NFL: { periods: 4, minutes: 15 },
+  CFB: { periods: 4, minutes: 15 },
+  NBA: { periods: 4, minutes: 12 },
+  CBB: { periods: 2, minutes: 20 },
+  NHL: { periods: 3, minutes: 20 },
+  MLB: { periods: 9, minutes: null }
+};
 
-  const normalizedStatus = statusMap[espnGame.status?.type?.name] || "unknown";
+const ESPN_STATUS_MAP = {
+  STATUS_SCHEDULED: "scheduled",
+  STATUS_PRE: "pre_game",
+  STATUS_IN_PROGRESS: "in_progress",
+  STATUS_FIRST_HALF: "in_progress",
+  STATUS_SECOND_HALF: "in_progress",
+  STATUS_HALFTIME: "halftime",
+  STATUS_END_PERIOD: "end_period",
+  STATUS_END_OF_PERIOD: "end_period",
+  STATUS_OVERTIME: "overtime",
+  STATUS_RAIN_DELAY: "delayed",
+  STATUS_DELAYED: "delayed",
+  STATUS_SUSPENDED: "delayed",
+  STATUS_FINAL: "final",
+  STATUS_FINAL_OT: "final",
+  STATUS_FINAL_PEN: "final",
+  STATUS_FULL_TIME: "final",
+  STATUS_FORFEIT: "final",
+  STATUS_POSTPONED: "postponed",
+  STATUS_CANCELED: "canceled"
+};
 
-  const gameClock = espnGame.status?.displayClock || "0:00";
-  const period = espnGame.status?.period || 0;
-  const gamePhase = calculateGamePhase(espnGame, sport);
+class NormalizationError extends Error {}
 
-  // Check for playoff status
-  const isPlayoff = espnGame.isPlayoff || false;
-  const playoffRound = espnGame.playoffRound?.short || null;
-
-  // Determine playoff round name from short code if available
-  let playoffRoundName = null;
-  if (isPlayoff && playoffRound) {
-    const roundMap = {
-      "WC": "wildcard",
-      "DIV": "first_round",
-      "CONF": "conf_semi",
-      "CONF_CHAMP": "conf_finals",
-      "SB": "championship",
-      "WS": "championship"
-    };
-    playoffRoundName = roundMap[playoffRound] || playoffRound.toLowerCase();
-  }
-
-  const game = {
-    id: espnGame.id ? `espn_${espnGame.id}` : "unknown",
-    sport: sport,
-    // Normalized team name = ESPN displayName ("Washington Commanders"), which is
-    // what the market tables key on (Spec §17.B).
-    homeTeam: homeTeam?.team?.displayName || homeTeam?.displayName || homeTeam?.team?.name || "Unknown",
-    awayTeam: awayTeam?.team?.displayName || awayTeam?.displayName || awayTeam?.team?.name || "Unknown",
-    homeTeamRank: homeTeam?.statistics?.find(s => s.name === "rank")?.value || null,
-    awayTeamRank: awayTeam?.statistics?.find(s => s.name === "rank")?.value || null,
-    homeScore: homeTeam?.score ? parseInt(homeTeam.score) : 0,
-    awayScore: awayTeam?.score ? parseInt(awayTeam.score) : 0,
-    gameStatus: normalizedStatus,
-    period: period,
-    gameClock: gameClock,
-    // ESPN shortDetail for MLB is e.g. "Top 7th"; parse the half for display.
-    inningHalf: sport === "MLB" ? parseInningHalf(espnGame.status?.type?.shortDetail) : null,
-    gamePhase: gamePhase,
-    isPlayoff: isPlayoff,
-    playoffRound: playoffRoundName,
-    gameNumber: espnGame.gameNumber || null,
-    totalGames: espnGame.totalGames || null,
-    winProbability: null,
-    scheduledStartTime: espnGame.date || null
-  };
-
-  return game;
+function parseClockMinutes(displayClock) {
+  if (!displayClock || typeof displayClock !== "string") return null;
+  const m = displayClock.match(/^(\d+):(\d{1,2})(?:\.\d+)?$/) || displayClock.match(/^(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  if (m.length === 3) return Number(m[1]) + Number(m[2]) / 60;
+  return Number(m[1]) / 60; // "45.3" = seconds remaining
 }
 
-// Mock data (REMOVE after live API integration)
+// 0 before the start, 1 at the end, otherwise fraction of regulation elapsed (capped at 1 in OT).
+function calculateGamePhase(sport, state, period, displayClock) {
+  if (state === "pre") return 0;
+  if (state === "post") return 1.0;
+  const reg = REGULATION[sport];
+  if (!reg || !period) return 0;
+  if (sport === "MLB") return Math.min(Math.max((period - 1) / 9, 0), 1);
+  if (period > reg.periods) return 1.0;
+  const remaining = parseClockMinutes(displayClock);
+  const minsLeft = remaining === null ? reg.minutes / 2 : remaining;
+  const elapsed = (period - 1) * reg.minutes + (reg.minutes - minsLeft);
+  return Math.min(Math.max(elapsed / (reg.periods * reg.minutes), 0), 1);
+}
+
+function playoffRoundFromHeadline(headline) {
+  const h = (headline || "").toLowerCase();
+  if (!h) return null;
+  if (h.includes("conference final")) return "conf_finals";
+  if (/super bowl|world series|stanley cup final|nba finals|national championship/.test(h)) return "championship";
+  if (/championship|alcs|nlcs/.test(h)) return "conf_finals";
+  if (/divisional|semifinal|second round|division series|alds|nlds/.test(h)) return "conf_semi";
+  if (/wild card|wild-card|first round/.test(h)) return "first_round";
+  return null;
+}
+
+// Returns { game, warnings }. Throws NormalizationError with a reason when a
+// required field is missing, so the caller can report it instead of guessing.
+function normalizeEspnEvent(event, sport) {
+  const warnings = [];
+  if (!event || !event.id) throw new NormalizationError("missing event id");
+  const comp = event.competitions && event.competitions[0];
+  if (!comp) throw new NormalizationError("no competitions[0]");
+  const competitors = comp.competitors || [];
+  const home = competitors.find(c => c.homeAway === "home");
+  const away = competitors.find(c => c.homeAway === "away");
+  if (!home || !away) throw new NormalizationError(`expected home and away competitors, got ${competitors.length}`);
+  const homeName = home.team && home.team.displayName;
+  const awayName = away.team && away.team.displayName;
+  if (!homeName || !awayName) throw new NormalizationError("competitor missing team.displayName");
+
+  const status = event.status || comp.status;
+  const type = status && status.type;
+  if (!type || !type.state) throw new NormalizationError("missing status.type.state");
+
+  let gameStatus = ESPN_STATUS_MAP[type.name];
+  if (!gameStatus) {
+    gameStatus = { pre: "scheduled", in: "in_progress", post: "final" }[type.state] || "unknown";
+    warnings.push(`unmapped status ${type.name}, used state "${type.state}" → ${gameStatus}`);
+  }
+
+  const period = Number(status.period) || 0;
+  const reg = REGULATION[sport];
+  if (type.state === "in" && reg && period > reg.periods) {
+    gameStatus = sport === "MLB" ? "extra_innings" : "overtime";
+  }
+
+  const parseScore = c => {
+    if (type.state === "pre") return 0;
+    const n = parseInt(c.score, 10);
+    if (Number.isNaN(n)) { warnings.push(`unparseable score "${c.score}" for ${c.team.displayName}`); return 0; }
+    return n;
+  };
+  const rankOf = c => {
+    const r = c.curatedRank && c.curatedRank.current;
+    return r && r < 99 ? r : null; // ESPN uses 99 for unranked
+  };
+
+  const headline = (comp.notes || []).map(n => n.headline).filter(Boolean).join(" · ");
+  const isPlayoff = !!(event.season && event.season.type === 3);
+  let playoffRound = null;
+  if (isPlayoff) {
+    playoffRound = playoffRoundFromHeadline(headline);
+    if (!playoffRound) warnings.push(`postseason round unknown ("${headline || "no headline"}"), multiplier 1.0`);
+  }
+
+  const prob = comp.situation && comp.situation.lastPlay && comp.situation.lastPlay.probability;
+  const winProbability = prob && typeof prob.homeWinPercentage === "number" ? prob.homeWinPercentage : null;
+
+  return {
+    warnings,
+    game: {
+      id: `espn_${event.id}`,
+      sport,
+      homeTeam: homeName,
+      awayTeam: awayName,
+      homeTeamRank: rankOf(home),
+      awayTeamRank: rankOf(away),
+      homeScore: parseScore(home),
+      awayScore: parseScore(away),
+      gameStatus,
+      espnState: type.state,
+      period,
+      gameClock: status.displayClock || "0:00",
+      statusDetail: type.shortDetail || type.detail || "",
+      inningHalf: sport === "MLB" ? parseInningHalf(type.shortDetail) : null,
+      gamePhase: calculateGamePhase(sport, type.state, period, status.displayClock),
+      isPlayoff,
+      playoffRound,
+      eventName: /super bowl/i.test(headline) ? "Super Bowl" : (headline || null),
+      gameNumber: null,
+      totalGames: null,
+      winProbability,
+      scheduledStartTime: event.date || null
+    }
+  };
+}
+
+// Today's US Eastern date as YYYYMMDD (ESPN's scoreboard day).
+function easternDateStamp(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(now);
+  const get = t => parts.find(p => p.type === t).value;
+  return `${get("year")}${get("month")}${get("day")}`;
+}
+
+function leagueUrl(league, now = new Date()) {
+  const url = new URL(`${PROXY_BASE_URL.replace(/\/+$/, "")}/scoreboard/${league.path}`);
+  Object.entries(league.params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+  if (league.datesToday) url.searchParams.set("dates", easternDateStamp(now));
+  return url.toString();
+}
+
+// In progress, or starting within the window. Finals / postponed / canceled are dropped.
+function isRelevantLiveGame(game, now = new Date()) {
+  if (game.espnState === "in") return true;
+  if (game.espnState !== "pre") return false;
+  if (game.gameStatus === "postponed" || game.gameStatus === "canceled") return false;
+  if (!game.scheduledStartTime) return false;
+  const hours = (new Date(game.scheduledStartTime).getTime() - now.getTime()) / 3600000;
+  return hours <= LIVE_UPCOMING_WINDOW_HOURS;
+}
+
+function normalizeLeaguePayload(json, league, now = new Date()) {
+  const events = Array.isArray(json && json.events) ? json.events : null;
+  if (!events) throw new Error("response has no events array");
+  const games = [], failures = [], warnings = [];
+  let filteredOut = 0;
+  for (const ev of events) {
+    try {
+      const { game, warnings: w } = normalizeEspnEvent(ev, league.sport);
+      w.forEach(msg => warnings.push({ id: ev.id, name: ev.name, message: msg }));
+      if (isRelevantLiveGame(game, now)) games.push(game); else filteredOut++;
+    } catch (err) {
+      if (!(err instanceof NormalizationError)) throw err;
+      failures.push({ id: ev && ev.id, name: ev && ev.name, reason: err.message });
+    }
+  }
+  return { sport: league.sport, returned: events.length, games, filteredOut, failures, warnings };
+}
+
+async function fetchLeague(league, now) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), LIVE_FETCH_TIMEOUT_MS) : null;
+  try {
+    const res = await fetch(leagueUrl(league, now), controller ? { signal: controller.signal } : {});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return normalizeLeaguePayload(await res.json(), league, now);
+  } catch (err) {
+    throw new Error(err.name === "AbortError" ? `timed out after ${LIVE_FETCH_TIMEOUT_MS / 1000}s` : err.message);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Last good result per league, so one failing league doesn't blank the others.
+const lastGoodLeague = {};
+
+// Never returns mock data. Throws only if every league failed and none has earlier data.
+async function fetchLiveGames(now = new Date()) {
+  if (!PROXY_BASE_URL) throw new Error("PROXY_BASE_URL is empty in config/live.js");
+  const results = await Promise.allSettled(LIVE_LEAGUES.map(l => fetchLeague(l, now)));
+  const leagues = [], errors = [];
+  let anyFresh = false;
+  results.forEach((r, i) => {
+    const sport = LIVE_LEAGUES[i].sport;
+    if (r.status === "fulfilled") {
+      lastGoodLeague[sport] = { ...r.value, fetchedAt: now.toISOString() };
+      leagues.push({ ...r.value, stale: false });
+      anyFresh = true;
+    } else {
+      errors.push({ sport, message: r.reason.message });
+      if (lastGoodLeague[sport]) leagues.push({ ...lastGoodLeague[sport], stale: true });
+    }
+  });
+  if (!anyFresh && !leagues.length) {
+    const err = new Error(`all ${LIVE_LEAGUES.length} leagues failed: ${errors.map(e => `${e.sport} ${e.message}`).join("; ")}`);
+    err.leagueErrors = errors;
+    throw err;
+  }
+  return {
+    source: "live",
+    games: leagues.flatMap(l => l.games),
+    leagues,
+    errors,
+    timestamp: now.toISOString(),
+    count: leagues.reduce((n, l) => n + l.games.length, 0)
+  };
+}
+
+// ---------- Mock data ----------
 // Scenarios: "tuesday" (default DC weeknight), "dc-playoff", "two-locks", "super-bowl".
 const MOCK_SCENARIOS = {
   "tuesday": "DC Tuesday night",
@@ -316,7 +442,8 @@ function generateMockGames(scenario = "tuesday") {
   };
 }
 
-async function fetchGames(scenario) {
-  // Mock data until live ESPN integration
-  return generateMockGames(scenario);
+// mode: "live" | "mock". Live errors propagate to the caller; there is no mock fallback.
+async function fetchGames(scenario, mode = "mock") {
+  if (mode === "live") return fetchLiveGames();
+  return { source: "mock", ...generateMockGames(scenario) };
 }

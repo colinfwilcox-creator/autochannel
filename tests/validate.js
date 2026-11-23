@@ -110,20 +110,47 @@ const dh = run(`(() => {
 console.log(`  diehard (${run("__bd.diehardId")}) shows ${dh.game} (${dh.score.toFixed(1)}); demoted games: ${dh.demoted}`);
 check(dh.demoted === 0 && dh.score === dh.top, "diehard holds the best non-saturated game");
 
-h("A4b Demoted game routing");
-run(`var __dem = generateMockGames("dc-playoff").games.map(g => g.homeTeam === "Boston Celtics"
-  ? { ...g, homeScore: 98, awayScore: 60, gamePhase: 0.8, winProbability: 0.99 } : g);`);
-const dem13 = run(`(() => { const a = runAssignmentCycle(__dem, __bd); return a.secondaries[__bd.diehardId]?.homeTeam; })()`);
-check(dem13 === "Boston Celtics", `S ≥ 4: demoted Celtics blowout goes to the diehard screen (got ${dem13})`);
+h("A4b Demoted game routing (needs anchor history, one-way)");
+// Cycle 1: competitive Celtics hold an anchor. Cycle 2: Celtics blowout → Demoted.
+run(`
+  var __base = generateMockGames("dc-playoff").games.map(g => ({ ...g, isPlayoff: false })); // no lock
+  var __blowCeltics = gs => gs.map(g => g.homeTeam === "Boston Celtics"
+    ? { ...g, homeScore: 98, awayScore: 60, gamePhase: 0.8, winProbability: 0.99 } : g);
+`);
+const dem16 = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 16, anchorTVs: [1,2,3,4] });
+  const hist = createAnchorHistory();
+  const a1 = runAssignmentCycle(__base, v, hist);
+  const anchoredFirst = Object.values(a1.anchors).some(g => g && g.homeTeam === "Boston Celtics");
+  const a2 = runAssignmentCycle(__blowCeltics(__base), v, hist);
+  const c2 = a2.allGames.find(g => g.homeTeam === "Boston Celtics");
+  const a3 = runAssignmentCycle(__base, v, hist); // tightens up again
+  const c3 = a3.allGames.find(g => g.homeTeam === "Boston Celtics");
+  return { anchoredFirst, state2: c2.anchorState, cs2: c2.channelScore, diehard2: a2.secondaries[v.diehardId]?.homeTeam,
+           onAnchor2: Object.values(a2.anchors).some(g => g && g.homeTeam === "Boston Celtics"),
+           state3: c3.anchorState, onAnchor3: Object.values(a3.anchors).some(g => g && g.homeTeam === "Boston Celtics") };
+})()`);
+console.log(`  cycle 1 anchored: ${dem16.anchoredFirst}; cycle 2 CS ${dem16.cs2.toFixed(1)} → ${dem16.state2}, diehard: ${dem16.diehard2}; cycle 3 (close again) → ${dem16.state3}`);
+check(dem16.anchoredFirst && dem16.state2 === "demoted" && !dem16.onAnchor2 && dem16.diehard2 === "Boston Celtics",
+  "S ≥ 4: anchored game that blows out is Demoted and moves to the diehard screen");
+check(dem16.state3 === "demoted" && !dem16.onAnchor3, "demotion is one-way: no return to an anchor when it tightens up");
+const fresh = run(`(() => {
+  const a = runAssignmentCycle(__blowCeltics(__base), buildVenue({ marketId: "washington-dc", totalTVs: 16, anchorTVs: [1,2,3,4] }));
+  return a.allGames.find(g => g.homeTeam === "Boston Celtics").anchorState;
+})()`);
+check(fresh !== "demoted", `a sub-35 game that never held an anchor is not Demoted (got ${fresh})`);
 const dem4 = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 4, anchorTVs: [1, 2] });
-  const games = __dem.filter(g => g.homeTeam !== "Washington Capitals");
-  const a = runAssignmentCycle(games, v);
+  const only = gs => gs.filter(g => !["Washington Capitals", "Boston Red Sox"].includes(g.homeTeam));
+  const hist = createAnchorHistory();
+  const a1 = runAssignmentCycle(only(__base), v, hist);
+  const anchoredFirst = Object.values(a1.anchors).some(g => g && g.homeTeam === "Boston Celtics");
+  const a = runAssignmentCycle(only(__blowCeltics(__base)), v, hist);
   const onAnchor = Object.values(a.anchors).some(g => g && g.homeTeam === "Boston Celtics");
   const onSec = Object.values(a.secondaries).some(g => g && g.homeTeam === "Boston Celtics");
-  return { onAnchor, onSec };
+  return { anchoredFirst, onAnchor, onSec };
 })()`);
-check(!dem4.onAnchor && dem4.onSec, "S < 4: demoted game takes the lowest-scoring secondary, never an anchor");
+check(dem4.anchoredFirst && !dem4.onAnchor && dem4.onSec, "S < 4: demoted game takes the lowest-scoring secondary, never an anchor");
 
 // ---------- A5: MLB display ----------
 h("A5  MLB display");

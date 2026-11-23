@@ -86,11 +86,12 @@ function getAnchorState(game, venue, lockedIds, history) {
 }
 
 // ---------- Share caps (Phase 6 §3, non-lock games) ----------
-// ChannelScore ≥ 55: ≤ 70% of TVs; 35–55: ≤ 40%; < 35: 1 TV. Rounded down, minimum 1.
+// ChannelScore ≥ 55: ≤ 70% of TVs; 35–55: ≤ 40%; < 35: ≤ 30% (Phase 7 decision 3).
+// Rounded down, minimum 1.
 function shareCap(game, totalTVs) {
   if (game.channelScore >= 55) return Math.max(1, Math.floor(totalTVs * 0.7));
   if (game.channelScore >= 35) return Math.max(1, Math.floor(totalTVs * 0.4));
-  return 1;
+  return Math.max(1, Math.floor(totalTVs * 0.3));
 }
 
 // ---------- 3. Programming the TVs (Phase 7) ----------
@@ -123,12 +124,37 @@ function isTVFree(a, tv) {
 }
 
 function gameItem(g) {
-  return { kind: "game", id: g.id, game: g, channel: g.displayChannel, strength: g.channelScore };
+  return { kind: "game", id: g.id, game: g, channel: g.displayChannel, sport: g.sport, strength: g.channelScore };
 }
 
+// Programming (grid entry or league network): strength = priority × showWeight (provisional).
 function programItem(e) {
-  return { kind: "program", id: `prog:${e.channel}:${e.show}`, channel: e.channel, show: e.show,
-           strength: e.priority, priority: e.priority, verify: !!e.verify, source: "grid" };
+  return { kind: "program", id: `prog:${e.channel}:${e.show || e.league || ""}`, channel: e.channel, show: e.show || null,
+           sport: e.league || null, strength: e.priority * TUNING.showWeight, priority: e.priority,
+           verify: !!e.verify, source: e.source || "grid" };
+}
+
+// Main-TV modes (Phase 7 decision 4). Returns plan[i] = index into `picked` for Main TV i.
+//   #1 leads #2 by ≥ mainTakeoverGap → every Main shows #1.
+//   Otherwise the original modes: A=1 → #1; A=2 → #1, #2; A≥3 → 2-1 (featured on
+//   the outer Mains, NFL flip) when the lead is ≥ dominanceGap, else 1-1-1.
+function planMains(picked, A, th) {
+  if (!picked.length || !A) return { plan: [], mode: "empty" };
+  if (picked.length === 1) return { plan: Array(A).fill(0), mode: "main = #1 (only item)" };
+  const gap = picked[0].strength - picked[1].strength;
+  if (A === 1) return { plan: [0], mode: "single" };
+  if (gap >= th.mainTakeoverGap) return { plan: Array(A).fill(0), mode: `main = #1 (leads by ${gap.toFixed(1)})` };
+  if (A === 2) return { plan: [0, 1], mode: `1-1 (lead ${gap.toFixed(1)} < ${th.mainTakeoverGap})` };
+  if (gap >= th.dominanceGap) {
+    let featured = 0, second = 1, mode = "2-1";
+    if (picked[0].sport !== "NFL" && picked[1].sport === "NFL") { featured = 1; second = 0; mode = "2-1 (NFL flip)"; }
+    const rest = [second, ...picked.map((_, i) => i).slice(2)];
+    const plan = [featured];
+    for (let i = 1; i <= A - 2; i++) plan.push(rest[i - 1] !== undefined ? rest[i - 1] : featured);
+    plan.push(featured);
+    return { plan, mode };
+  }
+  return { plan: Array.from({ length: A }, (_, i) => (i < picked.length ? i : 0)), mode: `${Array(A).fill(1).join("-")} (lead ${gap.toFixed(1)} < ${th.mainTakeoverGap})` };
 }
 
 function placeItem(a, tv, item) {
@@ -229,27 +255,29 @@ function programTVs(scored, fillerScored, lockResult, venue, history, now, grid)
   if (candidates.length < kLeft) candidates = [...candidates, ...extraFiller];
   let picked = candidates.slice(0, Math.min(kLeft, slots));
   let reserve = candidates.slice(picked.length);
-  // Main TVs need a #1 item when there's no lock.
-  if (!a.lockGame && picked.length) a.anchorMode = "main = #1";
+  // Main TVs (no lock): which picked item each Main shows.
+  const mains = a.lockGame ? { plan: [], mode: "lock" } : planMains(picked, A, venue.thresholds);
+  if (!a.lockGame) a.anchorMode = mains.mode;
 
   // 4. Share TVs: proportional to strength, ≥1 each, Main TVs to #1, caps on games.
   const capOf = it => (it.kind === "game" ? shareCap(it.game, N) : Infinity);
   let counts = [];
   for (let guard = 0; guard < 10 && picked.length; guard++) {
-    const mins = picked.map((it, i) => (i === 0 && !a.lockGame ? A : 1)); // Main TVs show #1 (cap permitting)
+    const mins = picked.map((it, i) => Math.max(1, mains.plan.filter(x => x === i).length)); // ≥ its Main TVs
     const maxes = picked.map(capOf);
     counts = proportionalSplit(slots, picked.map(it => it.strength), mins, maxes);
     if (counts.reduce((x, y) => x + y, 0) >= slots || !reserve.length) break;
     picked = [...picked, reserve.shift()]; // every pick hit its cap: bring in the next known item
   }
 
-  // Place: Main TVs show #1 (no lock), then the rest round-robin from #2 so items spread out.
+  // Place: Main TVs per the plan (no lock), then the rest round-robin from #2 so items spread out.
   const remaining = counts.slice();
   if (!a.lockGame && picked.length) {
-    for (const tv of venue.anchors) {
-      if (!isTVFree(a, tv) || remaining[0] <= 0) continue;
-      placeItem(a, tv, picked[0]); remaining[0]--;
-    }
+    venue.anchors.forEach((tv, m) => {
+      const i = mains.plan[m];
+      if (i === undefined || !isTVFree(a, tv) || remaining[i] <= 0) return;
+      placeItem(a, tv, picked[i]); remaining[i]--;
+    });
   }
   const order = picked.length > 1 ? [...picked.keys()].slice(1).concat(0) : [0];
   let cursor = 0;
@@ -297,6 +325,29 @@ function sportsWithGamesToday(games, now) {
   return set;
 }
 
+// Teams with a game on today's (US Eastern) slate.
+function teamsWithGamesToday(games, now) {
+  const today = easternDateStamp(now);
+  const set = new Set();
+  games.forEach(g => {
+    if (g.espnState === "in" || (g.scheduledStartTime && easternDateStamp(new Date(g.scheduledStartTime)) === today)) {
+      set.add(g.homeTeam); set.add(g.awayTeam);
+    }
+  });
+  return set;
+}
+
+// Programming known to be on now: grid entries airing + league networks in season.
+// One entry per channel (the highest priority).
+function knownProgrammingNow(games, venue, now) {
+  const all = [
+    ...programmingAiringNow(now, sportsWithGamesToday(games, now)),
+    ...leagueNetworksNow(now, venue.market, teamsWithGamesToday(games, now))
+  ].sort((x, y) => y.priority - x.priority);
+  const seen = new Set();
+  return all.filter(e => (seen.has(e.channel) ? false : seen.add(e.channel)));
+}
+
 // Full cycle: availability + tiers → watchable now → locks (identity) → score →
 // programTVs. `history` carries anchor/demotion state between cycles.
 // opts.programming: an explicit list of {channel, show, priority} airing now
@@ -310,7 +361,7 @@ function runAssignmentCycle(games, venue, history = createAnchorHistory(), now =
   const lockResult = resolveLocks(lockPool, venue);        // before scoring, by identity
   const scored = scoreGames(eligibleNow.length ? eligibleNow : fillerNow, venue);
   const fillerScored = eligibleNow.length ? scoreGames(fillerNow, venue) : [];
-  const grid = opts.programming || programmingAiringNow(now, sportsWithGamesToday(games, now));
+  const grid = opts.programming || knownProgrammingNow(games, venue, now);
   const a = programTVs(scored, fillerScored, lockResult, venue, history, now, grid);
   a.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
 

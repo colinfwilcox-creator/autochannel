@@ -68,6 +68,39 @@ const PROGRAMMING_GRID = [
   { channel: "Golf Channel", show: "Golf Central", days: ALL_DAYS, start: "18:00", end: "19:00", priority: 40, verify: true }
 ];
 
+// ---------- Tuning ----------
+const TUNING = {
+  // PROVISIONAL (Phase 7 decision 2): programming priorities (grid entries and
+  // league networks) are multiplied by showWeight before they are compared with
+  // game ChannelScores. Tune against tests/golden/.
+  showWeight: 0.35
+};
+
+// ---------- League networks (Phase 7 decision 1) ----------
+// Known content whenever their league is in season, all day; no specific show needed.
+// Priority 40, +25 on a day the selected market's own team in that league plays.
+const LEAGUE_NETWORKS = [
+  { channel: "NFL Network", league: "NFL", season: NFL_SEASON },
+  { channel: "NBA TV", league: "NBA", season: NBA_SEASON },
+  { channel: "NHL Network", league: "NHL", season: NHL_SEASON },
+  { channel: "MLB Network", league: "MLB", season: MLB_SEASON }
+];
+const LEAGUE_NETWORK_PRIORITY = 40;
+const LEAGUE_NETWORK_TEAM_DAY_BONUS = 25;
+
+// teamsToday: Set of team names with a game on today's slate.
+function leagueNetworksNow(now, market, teamsToday) {
+  const monthDay = easternClock(now).monthDay;
+  return LEAGUE_NETWORKS
+    .filter(n => inSeason(n.season, monthDay))
+    .map(n => {
+      const homeTeams = (market && market.home && market.home[n.league]) || [];
+      const teamDay = homeTeams.some(t => teamsToday.has(t));
+      return { channel: n.channel, show: null, league: n.league, source: "league",
+               priority: LEAGUE_NETWORK_PRIORITY + (teamDay ? LEAGUE_NETWORK_TEAM_DAY_BONUS : 0), teamDay };
+    });
+}
+
 // Last resort, only when nothing at all (no game, no grid entry) is known to be on.
 // Phase 7: bare channel names with unknown content are otherwise never shown.
 const ALWAYS_AVAILABLE_CHANNELS = ["NFL Network", "MLB Network", "NHL Network", "NBA TV", "Golf Channel", "ESPN News"];

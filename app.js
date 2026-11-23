@@ -674,7 +674,7 @@ function createTVCard(tv, game, opts) {
 
   if (!game) {
     const fallbackDisplay = program
-      ? `<div class="fallback-content"><span class="fallback-label">📺 ${program.source === "grid" ? `grid · priority ${program.priority}${program.verify ? " · verify" : ""}` : "always-available"}</span>
+      ? `<div class="fallback-content"><span class="fallback-label">📺 ${program.source === "grid" ? `grid · priority ${program.priority}${program.verify ? " · verify" : ""}` : program.source === "league" ? `league network · priority ${program.priority}` : "always-available (nothing known on)"}</span>
            <span class="fallback-channel">${escapeHtml(program.channel)}</span>${program.show && program.show !== program.channel ? `<span class="program-show">${escapeHtml(program.show)}</span>` : ""}</div>`
       : `<div class="no-content">No unused sports channel — venue's choice</div>`;
     card.innerHTML = `<div class="tv-id">${title}</div>${fallbackDisplay}`;

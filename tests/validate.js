@@ -157,7 +157,7 @@ const mlb = run(`formatGameClock(generateMockGames().games.find(g => g.sport ===
 check(mlb === "Top 7th", `MLB card shows "${mlb}"`);
 
 // ---------- C: Main TVs (Phase 7 replaces the 1-1-1 / 2-1 / NFL-flip anchor rules) ----------
-h("C   Main TVs show the #1 item; distinct-content target");
+h("C   Main TVs and the distinct-content target");
 for (const [n, k] of [[1, 1], [3, 1], [4, 2], [7, 3], [9, 3], [13, 5], [15, 5], [20, 5]]) {
   check(run(`distinctTarget(${n})`) === k, `${n} TVs → about ${k} different things on screen`);
 }
@@ -170,8 +170,8 @@ for (const N of [6, 8, 13, 16]) {
     const distinct = new Set(v.tvs.map(tv => (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id]?.id).filter(Boolean)).size;
     return { A: v.anchors.length, main: v.anchors.map(tv => a.anchors[tv.id]?.homeTeam), top: top.homeTeam, distinct, target: distinctTarget(${N}) };
   })()`);
-  check(r.main.every(t => t === r.top) && r.distinct <= r.target,
-    `${N} TVs: all ${r.A} Main TV(s) show #1 (${r.top}); ${r.distinct} distinct game(s), target ${r.target}`);
+  check(r.distinct <= r.target && r.main[0] === r.top,
+    `${N} TVs: Main TV 1 shows #1 (${r.top}); Mains ${r.main.join(" | ")}; ${r.distinct} distinct game(s), target ${r.target}`);
 }
 
 // ---------- D3: other markets ----------
@@ -305,7 +305,7 @@ for (const [label, g, v, want, ch] of av) {
 }
 
 h("P6.3 Share caps");
-const caps = [[60, 15, 10], [55, 15, 10], [54.9, 15, 6], [35, 15, 6], [34.9, 15, 1], [60, 5, 3], [40, 5, 2], [60, 2, 1], [60, 1, 1], [40, 1, 1]];
+const caps = [[60, 15, 10], [55, 15, 10], [54.9, 15, 6], [35, 15, 6], [34.9, 15, 4], [20, 7, 2], [20, 3, 1], [60, 5, 3], [40, 5, 2], [60, 2, 1], [60, 1, 1], [40, 1, 1]];
 for (const [cs, n, want] of caps) check(run(`shareCap({ channelScore: ${cs} }, ${n})`) === want, `ChannelScore ${cs}, ${n} TVs → at most ${want}`);
 
 h("P7.1 Programming the TVs");
@@ -376,8 +376,41 @@ const capped = run(`(() => {
   const a = runAssignmentCycle([g], v, createAnchorHistory(), __mon430, { programming: [] });
   return Object.values(a.programming);
 })()`);
-check(capped.filter(p => p === null).length === 6 && !capped.some(p => p && p.source === "always"),
-  "a known game at its cap: the rest is left to the venue, never filled with unknown channels");
+check(capped.filter(p => p === null).length === 5 && !capped.some(p => p && p.source === "always"),
+  "a known game at its cap (30% of 7 = 2 TVs): the rest is left to the venue, never filled with unknown channels");
+
+h("P7.2 Phase 7 decisions: league networks, showWeight, Main-TV modes");
+check(run("TUNING.showWeight") === 0.35, "showWeight is 0.35 (provisional)");
+check(run(`programItem({ channel: "ESPN", show: "NFL Live", priority: 70 }).strength`) === 70 * 0.35, "programming strength = priority × showWeight");
+run(`var __dcv = buildVenue({ marketId: "washington-dc", totalTVs: 7 });`);
+const ln = (iso, teams) => run(`leagueNetworksNow(new Date("${iso}"), __dcv.market, new Set(${JSON.stringify(teams)}))`);
+const nov = ln("2026-11-23T21:37:00Z", ["Washington Commanders"]);
+const byCh = Object.fromEntries(nov.map(e => [e.channel, e.priority]));
+check(byCh["NFL Network"] === 65 && byCh["NBA TV"] === 40 && byCh["NHL Network"] === 40 && !("MLB Network" in byCh),
+  `Nov 23 with the Commanders playing: ${nov.map(e => e.channel + " " + e.priority).join(", ")} (MLB Network out of season)`);
+const noTeam = ln("2026-11-23T21:37:00Z", ["Dallas Cowboys"]);
+check(noTeam.find(e => e.channel === "NFL Network").priority === 40, "+25 only for the selected market's own team (Cowboys playing: NFL Network stays 40)");
+const july = ln("2026-07-10T21:00:00Z", ["Washington Nationals"]);
+check(july.map(e => e.channel).join() === "MLB Network" && july[0].priority === 65, `July with the Nationals playing: only MLB Network, priority ${july[0].priority}`);
+check(nov.every(e => e.show === null && e.source === "league"), "league networks need no specific show");
+check(run(`knownProgrammingNow([], __dcv, new Date("2026-11-23T21:37:00Z")).filter(e => e.channel === "NFL Network").length`) === 1,
+  "one entry per channel when the grid and a league network share it");
+
+const pm = (strengths, A, sports = []) => run(`planMains(${JSON.stringify(strengths.map((x, i) => ({ strength: x, sport: sports[i] || "NBA" })))}, ${A}, __dcv.thresholds)`);
+const t1 = pm([24.5, 22.75, 19.2], 2);
+check(t1.plan.join() === "0,1", `A=2, lead 1.75 < 15 → 1-1: Mains show #1, #2 (${t1.mode})`);
+const t2 = pm([60, 40, 30], 2);
+check(t2.plan.join() === "0,0", `A=2, lead 20 ≥ 15 → every Main shows #1 (${t2.mode})`);
+const t3 = pm([50, 45, 40, 35], 3);
+check(t3.plan.join() === "0,1,2", `A=3, lead 5 → 1-1-1 (${t3.mode})`);
+const t4 = pm([70, 40, 30], 3);
+check(t4.plan.join() === "0,0,0", `A=3, lead 30 → every Main shows #1 (${t4.mode})`);
+check(pm([50], 4).plan.join() === "0,0,0,0", "a single item takes every Main");
+run(`var __th2 = { ...__dcv.thresholds, mainTakeoverGap: 30 };`);
+const flip = run(`planMains([{ strength: 70, sport: "NBA" }, { strength: 50, sport: "NFL" }, { strength: 40, sport: "NHL" }], 4, __th2)`);
+check(flip.plan.join() === "1,0,2,1", `with mainTakeoverGap raised to 30, a lead of 20 gives 2-1 + NFL flip (${flip.mode}: ${flip.plan})`);
+const two1 = run(`planMains([{ strength: 70, sport: "NBA" }, { strength: 50, sport: "NHL" }, { strength: 40, sport: "NHL" }], 3, __th2)`);
+check(two1.plan.join() === "0,1,0", `…and 2-1 without the flip puts the featured item on the outer Mains (${two1.plan})`);
 
 h("P6.5 Programming grid");
 const gridBad = run(`PROGRAMMING_GRID.filter(e => !e.channel || !e.show || !e.days.length || e.days.some(d => !ALL_DAYS.includes(d))

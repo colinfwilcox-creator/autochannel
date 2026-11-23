@@ -42,7 +42,7 @@ function runScenario(file) {
   const out = run(`(() => {
     const v = buildVenue({ marketId: __sc.marketId, totalTVs: __sc.tvs });
     const opts = __sc.programming ? { programming: __sc.programming } : {};
-    const airing = __sc.programming || programmingAiringNow(__sc.now, sportsWithGamesToday(__sc.games, __sc.now));
+    const airing = __sc.programming || knownProgrammingNow(__sc.games, v, __sc.now);
     const a = runAssignmentCycle(__sc.games, v, createAnchorHistory(), __sc.now, opts);
     const slots = v.tvs.map(tv => {
       const g = (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id];
@@ -51,11 +51,11 @@ function runScenario(file) {
       if (p) return { tv: tv.number, main: tv.role === "anchor", kind: "program", channel: p.channel, show: p.show };
       return { tv: tv.number, main: tv.role === "anchor", kind: "none", channel: null };
     });
-    return { slots, items: a.items.map(i => ({ kind: i.kind, channel: i.channel, label: i.show || (i.game.awayTeam + " @ " + i.game.homeTeam), strength: i.strength,
+    return { slots, items: a.items.map(i => ({ kind: i.kind, channel: i.channel, label: i.kind === "game" ? i.game.awayTeam + " @ " + i.game.homeTeam : (i.show || "league network"), strength: i.strength,
                                                 cap: i.kind === "game" ? shareCap(i.game, v.tvs.length) : null })),
-             airing: airing.map(e => e.channel + " · " + e.show + " (" + e.priority + ")"),
+             airing: airing.map(e => e.channel + " · " + (e.show || "league network" + (e.teamDay ? ", team plays today" : "")) + " (" + e.priority + " → " + (e.priority * TUNING.showWeight).toFixed(2) + ")"),
              watchable: a.allGames.map(g => g.displayChannel + " · " + g.awayTeam + " @ " + g.homeTeam + " CS " + g.channelScore.toFixed(1) + " cap " + shareCap(g, v.tvs.length)),
-             target: a.distinctTarget, marketName: v.marketName };
+             target: a.distinctTarget, marketName: v.marketName, mode: a.anchorMode };
   })()`);
 
   // Score: Main TVs by position, the rest as a multiset. `pair` maps each expected
@@ -83,7 +83,8 @@ function runScenario(file) {
   console.log(`market ${out.marketName} · ${sc.venue.tvCount} TVs · distinct-content target ${out.target}`);
   console.log(`grid airing: ${out.airing.join(" | ") || "none"}`);
   console.log(`watchable games: ${out.watchable.join(" | ") || "none"}`);
-  console.log(`items picked (strength = ChannelScore or grid priority): ${out.items.map(i => `${i.channel} · ${i.label} [${i.strength.toFixed(1)}${i.cap ? ", cap " + i.cap : ""}]`).join(" | ")}`);
+  console.log(`main-TV mode: ${out.mode}`);
+  console.log(`items picked (strength = ChannelScore, or priority × showWeight ${run("TUNING.showWeight")}): ${out.items.map(i => `${i.channel} · ${i.label} [${i.strength.toFixed(1)}${i.cap ? ", cap " + i.cap : ""}]`).join(" | ")}`);
   console.log("\nDefault screen (actual):");
   act.forEach(s => console.log(`  TV ${s.tv}${s.main ? " · Main" : ""} — ${lineFor(s)}`));
   console.log("\nPer TV (channel match; non-Main TVs compared as a group, so each is paired with the actual TV it matched):");

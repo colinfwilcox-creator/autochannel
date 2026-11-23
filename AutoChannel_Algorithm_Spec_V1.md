@@ -324,3 +324,127 @@ Scored at mid-game, 60/40 win probability, for calibration reference:
 - Machine learning weight tuning based on operator feedback over time
 ---
 *This document represents the complete V1 algorithm as designed. All thresholds are tunable per venue. The formula is fixed; the config is the variable.*
+
+---
+## 17. Phase 3 — Multi-market + Variable TV Count
+**Precedence:** Where this section conflicts with Sections 1–13, Section 17 wins. (There are no Sections 14–16. The number was set by the Phase 3 brief.)
+
+### 17.A Prerequisite fixes
+1. **Lock list runs before scoring.** A lock-list game claims anchors and saturation by identity, never by ChannelScore. Lock games are never demoted by ChannelScore. They release only when the game ends.
+2. **Saturation formula** (replaces §6 saturation):
+   ```javascript
+   const eligible = secondaries.filter(t => t.saturationEligible).length; // excludes diehard
+   let n = Math.min(Math.round(S * sat), eligible);
+   if (sat < 1.0) n = Math.min(n, Math.max(eligible - 1, 0)); // keep ≥1 secondary independent
+   ```
+   For Barking Dog (13 TVs / 3 anchors), a Commanders game lands on 10 TVs: 3 anchors + 7 secondaries.
+3. **Multiple lock-list games live at once:** the game whose entry appears first in the lock list gets the full lock and saturation. Others are scored normally and are guaranteed at least one secondary.
+4. **Diehard screen with nothing demoted:** fills by ChannelScore like any secondary. Still saturation-exempt.
+5. **MLB display:** show the inning ("Top 7th") instead of a game clock.
+
+### 17.B Market relevance template
+**Setup inputs**
+- `market`: dropdown from `config/markets.js` (US metros with pro teams)
+- `totalTVs` N (minimum 2)
+- `anchorCount` A (1 ≤ A < N). Default: `clamp(round(N × 0.25), 1, 4)`
+- Secondaries S = N − A. The user marks which TVs are anchors.
+- Barking Dog is a saved preset: Washington DC, 13 TVs, 3 anchors (TVs 1–3), diehard = Secondary 3.
+
+**Base score tiers**
+
+| Tier | Base |
+|---|---|
+| Home NFL | 90 |
+| Home NHL | 85 |
+| Home MLB | 80 |
+| Home NBA | 70 |
+| Home MLS | 60 |
+| Home WNBA | 45 |
+| Flagship college program in market | 65 |
+| Secondary college program in market | 50 |
+| Regional pro team (same media region, not home) | round5(home base for that sport × 0.6) |
+| Premium national draw | 40 |
+| Recognizable national program | 35 |
+| Generic | 15 |
+
+**Rules**
+- A team's score is the max across every tier it qualifies for.
+- A game uses the higher of its two teams.
+- Optional per-team `adjust` (±10) for local quirks.
+- Team names must exactly match the fetcher's normalized names (ESPN displayName).
+- Scorer lookup order: market table → national draws → national programs → generic.
+
+**Schema + generator**
+```javascript
+// config/markets.js
+const MARKETS = {
+  "washington-dc": {
+    name: "Washington, DC",
+    home: {
+      NFL: ["Washington Commanders"],
+      NHL: ["Washington Capitals"],
+      MLB: ["Washington Nationals"],
+      NBA: ["Washington Wizards"]
+    },
+    college: [{ name: "Maryland Terrapins", tier: "flagship" }],
+    regional: [
+      { name: "Baltimore Ravens", sport: "NFL" },
+      { name: "Baltimore Orioles", sport: "MLB" }
+    ]
+  }
+};
+
+const HOME_BASE = { NFL: 90, NHL: 85, MLB: 80, NBA: 70, MLS: 60, WNBA: 45 };
+const COLLEGE_BASE = { flagship: 65, secondary: 50 };
+const round5 = x => Math.round(x / 5) * 5;
+
+function buildTeamTable(m) {
+  const t = {};
+  const set = (name, v) => { t[name] = Math.max(t[name] ?? 0, v); };
+  for (const [sport, teams] of Object.entries(m.home)) teams.forEach(n => set(n, HOME_BASE[sport]));
+  m.college.forEach(c => set(c.name, COLLEGE_BASE[c.tier]));
+  m.regional.forEach(r => set(r.name, round5(HOME_BASE[r.sport] * 0.6)));
+  return t;
+}
+```
+
+**National lists** (`config/national.js`)
+- Draws (40): Yankees, Dodgers, Red Sox, Cowboys, Chiefs, Packers, 49ers, Patriots, Lakers, Celtics, Warriors
+- Programs (35): Ohio State, Alabama, Michigan, Georgia, Texas, Notre Dame, LSU, Clemson
+
+**Auto-generated lock list** (editable per venue)
+- Home NFL team: `any_game`, all anchors, saturation 0.70
+- Every other home pro team: `playoff_only`, all anchors, saturation 0.60
+- Super Bowl and World Cup Final: saturation 1.0
+- Market with no home NFL team: the highest-base home team gets the `any_game` lock at 0.70
+
+Teams whose tier is uncertain are listed in each market's `flags` array. They are not guessed silently.
+
+### 17.C TV scaling
+**Anchor assignment (non-lock games)**
+- A = 1: top-scoring game.
+- A = 2: #1 and #2, one each. 2-1 split disabled.
+- A ≥ 3: 1-1-1 gives the top A games. A 2-1 split (gap ≥ 15) puts the featured game on anchors 1 and A; #2, #3, etc. fill the interior anchors. NFL flip rule unchanged.
+- Lock game: takes all A anchors.
+
+**Diehard screen**
+- If S ≥ 4: one designated diehard secondary (default: last secondary, user-changeable).
+- If S < 4: no designated diehard. A demoted game drops to the secondary showing the lowest ChannelScore (never an anchor).
+
+**Expected saturation results**
+
+| N / A / S | Diehard | Commanders (0.70) | DC playoff (0.60) | Super Bowl (1.0) |
+|---|---|---|---|---|
+| 13 / 3 / 10 | Yes | 7 secondaries | 6 | 9 |
+| 8 / 2 / 6 | Yes | 4 | 4 | 5 |
+| 4 / 2 / 2 | No | 1 | 1 | 2 |
+| 4 / 1 / 3 | No | 2 | 2 | 3 |
+
+### 17.D Build notes (where 17.A–C were silent)
+- **Lock list order:** events (Super Bowl, World Cup Final) come first, then `any_game` teams, then `playoff_only` teams by base score. A Super Bowl involving the home team therefore uses saturation 1.0, not 0.70. In a market with two home NFL teams, the first one listed wins if both play at once.
+- **Lock window:** a lock activates 30 minutes before the scheduled start and releases at final (§6.1).
+- **Super Bowl detection:** NFL + postseason + championship round, or `eventName === "Super Bowl"`. World Cup Final is matched by `eventName` only. The fetcher has no soccer feed yet.
+- **Guaranteed secondary, no free TV:** if saturation 1.0 with no diehard leaves no free secondary for a second lock game, that game takes the last saturated TV.
+- **Demotion is stateless per cycle:** any non-lock game under 35 counts as Demoted. It never takes an anchor, and the highest-scoring demoted game gets the diehard screen. There's no anchor history yet, so this also covers low-scoring games that never held an anchor.
+- **DC table:** D.C. United (MLS) and Washington Mystics (WNBA) are left out of `washington-dc`. That keeps it identical to the §4.1 Barking Dog table. Both are flagged.
+- **Relevance floor:** under §4 a home NFL game in season keeps Relevance ≈ 94 (90 × 1.3 × 0.8). Its ChannelScore therefore can't fall below about 37, so it can't reach the 35 demotion line by blowout.

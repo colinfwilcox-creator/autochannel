@@ -1,9 +1,9 @@
-// Phase 2: Scoring logic
-// Calculates Relevance, Vitality, and ChannelScore for each game
+// Scoring logic
+// Calculates Relevance, Vitality, and ChannelScore for each game.
+// BaseTeamScore comes from the venue's market lookup (Spec §17.B).
 
-function getBaseTeamScore(teamName) {
-  if (!teamName) return 15;
-  return VENUE_CONFIG.teamRelevanceTable[teamName] || 15;
+function getBaseTeamScore(teamName, venue) {
+  return venue.baseTeamScore(teamName);
 }
 
 function calculateMarqueeBonus(game) {
@@ -59,11 +59,16 @@ function getStakesModifier(sport, gameNumber, totalGames) {
   return 0.45;
 }
 
-function calculateRelevance(game) {
-  const baseTeamScore = Math.max(
-    getBaseTeamScore(game.homeTeam),
-    getBaseTeamScore(game.awayTeam)
+function calculateBaseScore(game, venue) {
+  // A game uses the higher of its two teams.
+  return Math.max(
+    getBaseTeamScore(game.homeTeam, venue),
+    getBaseTeamScore(game.awayTeam, venue)
   );
+}
+
+function calculateRelevance(game, venue) {
+  const baseTeamScore = calculateBaseScore(game, venue);
 
   const marqueeBonus = calculateMarqueeBonus(game);
   const playoffMult = getPlayoffMultiplier(game);
@@ -158,19 +163,25 @@ function calculateVitality(game) {
   return Math.min(vitality, 100);
 }
 
-function calculateChannelScore(game) {
-  const relevance = calculateRelevance(game);
-  const vitality = calculateVitality(game);
-
+function combineChannelScore(relevance, vitality) {
   const score = (relevance * 0.4) + (vitality * 0.4) + ((relevance * vitality / 100) * 0.2);
   return Math.min(Math.max(score, 0), 100);
 }
 
-function scoreGames(games) {
-  return games.map(game => ({
-    ...game,
-    relevance: calculateRelevance(game),
-    vitality: calculateVitality(game),
-    channelScore: calculateChannelScore(game)
-  }));
+function calculateChannelScore(game, venue) {
+  return combineChannelScore(calculateRelevance(game, venue), calculateVitality(game));
+}
+
+function scoreGames(games, venue) {
+  return games.map(game => {
+    const relevance = calculateRelevance(game, venue);
+    const vitality = calculateVitality(game);
+    return {
+      ...game,
+      baseScore: calculateBaseScore(game, venue),
+      relevance,
+      vitality,
+      channelScore: combineChannelScore(relevance, vitality)
+    };
+  });
 }

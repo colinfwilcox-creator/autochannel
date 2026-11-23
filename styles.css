@@ -640,3 +640,80 @@ tbody tr:hover {
     font-size: 11px;
   }
 }
+
+/* ---------- Phase 3: venue setup ---------- */
+.setup-panel {
+  background: rgba(26, 26, 46, 0.8);
+  border: 2px solid #2c5282;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.setup-panel > summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  list-style: none;
+}
+.setup-panel > summary::-webkit-details-marker { display: none; }
+.setup-panel > summary h2 { font-size: 16px; color: #fff; letter-spacing: 1px; }
+.setup-panel > summary h2::before { content: "▸ "; color: #63b3ed; }
+.setup-panel[open] > summary h2::before { content: "▾ "; }
+.setup-summary { font-size: 13px; color: #aaa; }
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.setup-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #aaa; }
+.setup-grid select, .setup-grid input, #setup-diehard {
+  background: #0f0f1e;
+  color: #e0e0e0;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 14px;
+  min-height: 40px;
+}
+.setup-block { margin-top: 16px; }
+.setup-label { font-size: 12px; color: #aaa; margin-bottom: 8px; }
+.setup-hint { font-size: 12px; color: #888; }
+.setup-link {
+  background: none; border: none; color: #63b3ed; cursor: pointer; font-size: 12px;
+  text-decoration: underline; margin-left: 8px; padding: 0;
+}
+.tv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tv-chip {
+  min-width: 40px; min-height: 40px;
+  border-radius: 6px; border: 1px solid #555;
+  background: #1f2937; color: #ddd; font-weight: 600; cursor: pointer;
+}
+.tv-chip.is-anchor { background: #e74c3c; border-color: #e74c3c; color: #fff; }
+.tv-chip.is-diehard { border-color: #f39c12; box-shadow: inset 0 0 0 2px #f39c12; }
+.setup-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.lock-list, .team-table { list-style: none; font-size: 13px; }
+.lock-list li, .team-table li {
+  display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid #2a2a3e;
+}
+.team-table li { justify-content: space-between; }
+.lock-rank { color: #666; width: 18px; }
+.lock-name { flex: 1; color: #ddd; }
+.lock-trigger { color: #63b3ed; }
+.lock-sat { color: #f39c12; }
+.setup-flags { margin-top: 16px; font-size: 12px; color: #bbb; }
+.setup-flags summary { cursor: pointer; color: #f39c12; }
+.setup-flags ul { margin: 8px 0 0 18px; }
+.setup-flags li { margin-bottom: 4px; }
+.tv-number { color: #777; font-weight: 400; font-size: 11px; margin-left: 4px; }
+
+@media (max-width: 600px) {
+  main { padding: 16px; }
+  .tv-section { padding: 16px; }
+  .scores-table { overflow-x: auto; }
+}

@@ -1,72 +1,16 @@
-const VENUE_CONFIG = {
-  venueId: "barking-dog-bethesda",
-  venueName: "Barking Dog",
-  market: "Washington DC",
+// Phase 3: Venue presets and shared defaults (Spec §17.B–C)
+// A venue = market + TV count + which TVs are anchors + diehard choice.
+// The runtime venue object is built by buildVenue() in modules/venue.js.
 
-  anchorTVs: [
-    { id: "anchor_1", position: "left" },
-    { id: "anchor_2", position: "center" },
-    { id: "anchor_3", position: "right" }
-  ],
-
-  secondaryTVs: [
-    { id: "secondary_1", saturationEligible: true },
-    { id: "secondary_2", saturationEligible: true },
-    { id: "secondary_3", saturationEligible: false, isDiehardScreen: true },
-    { id: "secondary_4", saturationEligible: true },
-    { id: "secondary_5", saturationEligible: true },
-    { id: "secondary_6", saturationEligible: true },
-    { id: "secondary_7", saturationEligible: true },
-    { id: "secondary_8", saturationEligible: true },
-    { id: "secondary_9", saturationEligible: true },
-    { id: "secondary_10", saturationEligible: true }
-  ],
-
-  lockList: [
-    {
-      team: "Washington Commanders",
-      trigger: "any_game",
-      anchorMode: "3-anchor-lock",
-      saturation: 0.70
-    },
-    {
-      team: "Washington Capitals",
-      trigger: "playoff_only",
-      anchorMode: "3-anchor-lock",
-      saturation: 0.60
-    },
-    {
-      team: "Washington Nationals",
-      trigger: "playoff_only",
-      anchorMode: "3-anchor-lock",
-      saturation: 0.60
-    },
-    {
-      team: "Washington Wizards",
-      trigger: "playoff_only",
-      anchorMode: "3-anchor-lock",
-      saturation: 0.60
-    }
-  ],
-
-  teamRelevanceTable: {
-    "Washington Commanders": 90,
-    "Washington Capitals": 85,
-    "Washington Nationals": 80,
-    "Washington Wizards": 70,
-    "Maryland Terrapins": 65,
-    "Baltimore Ravens": 55,
-    "Baltimore Orioles": 50
-  },
-
+const VENUE_DEFAULTS = {
   thresholds: {
     dominanceGap: 15,
     blowoutDemotion: 35,
     completionProtectionMinScore: 55,
     completionProtectionPhase: 0.85,
-    manualOverrideLockSeconds: 1800
+    manualOverrideLockSeconds: 1800,
+    lockLeadMinutes: 30
   },
-
   fallbackChannels: [
     "NFL Network",
     "MLB Network",
@@ -74,4 +18,16 @@ const VENUE_CONFIG = {
     "Golf Channel",
     "ESPN News"
   ]
+};
+
+const VENUE_PRESETS = {
+  "barking-dog": {
+    venueName: "Barking Dog, Bethesda MD",
+    marketId: "washington-dc",
+    totalTVs: 13,
+    anchorTVs: [1, 2, 3],   // TV numbers marked as anchors
+    diehardTV: 6,           // Secondary 3 (spec §2)
+    lockListOverride: null, // null = auto-generated from the market
+    adjust: {}              // optional per-team ±10
+  }
 };

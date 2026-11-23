@@ -55,6 +55,31 @@ function calculateGamePhase(game, sport) {
   return Math.min(Math.max(gamePhase, 0), 1.0);
 }
 
+function parseInningHalf(detail) {
+  if (!detail) return null;
+  const d = detail.toLowerCase();
+  if (d.startsWith("top")) return "top";
+  if (d.startsWith("bot")) return "bottom";
+  if (d.startsWith("mid")) return "middle";
+  if (d.startsWith("end")) return "end";
+  return null;
+}
+
+function ordinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  return n + ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+}
+
+// Clock text for the TV card. MLB shows the inning instead of a clock (§17.A.5).
+function formatGameClock(game) {
+  if (game.sport === "MLB") {
+    const half = { top: "Top", bottom: "Bot", middle: "Mid", end: "End" }[game.inningHalf] || "Inning";
+    return game.period ? `${half} ${ordinal(game.period)}` : "—";
+  }
+  return game.gameClock;
+}
+
 function normalizeGame(espnGame, sport) {
   const homeTeam = espnGame.competitors?.find(c => c.homeAway === "home");
   const awayTeam = espnGame.competitors?.find(c => c.homeAway === "away");
@@ -102,8 +127,10 @@ function normalizeGame(espnGame, sport) {
   const game = {
     id: espnGame.id ? `espn_${espnGame.id}` : "unknown",
     sport: sport,
-    homeTeam: homeTeam?.team?.name || homeTeam?.displayName || "Unknown",
-    awayTeam: awayTeam?.team?.name || awayTeam?.displayName || "Unknown",
+    // Normalized team name = ESPN displayName ("Washington Commanders"), which is
+    // what the market tables key on (Spec §17.B).
+    homeTeam: homeTeam?.team?.displayName || homeTeam?.displayName || homeTeam?.team?.name || "Unknown",
+    awayTeam: awayTeam?.team?.displayName || awayTeam?.displayName || awayTeam?.team?.name || "Unknown",
     homeTeamRank: homeTeam?.statistics?.find(s => s.name === "rank")?.value || null,
     awayTeamRank: awayTeam?.statistics?.find(s => s.name === "rank")?.value || null,
     homeScore: homeTeam?.score ? parseInt(homeTeam.score) : 0,
@@ -111,6 +138,8 @@ function normalizeGame(espnGame, sport) {
     gameStatus: normalizedStatus,
     period: period,
     gameClock: gameClock,
+    // ESPN shortDetail for MLB is e.g. "Top 7th"; parse the half for display.
+    inningHalf: sport === "MLB" ? parseInningHalf(espnGame.status?.type?.shortDetail) : null,
     gamePhase: gamePhase,
     isPlayoff: isPlayoff,
     playoffRound: playoffRoundName,
@@ -123,8 +152,16 @@ function normalizeGame(espnGame, sport) {
   return game;
 }
 
-// Mock data for Phase 1 testing (REMOVE after live API integration)
-function generateMockGames() {
+// Mock data (REMOVE after live API integration)
+// Scenarios: "tuesday" (default DC weeknight), "dc-playoff", "two-locks", "super-bowl".
+const MOCK_SCENARIOS = {
+  "tuesday": "DC Tuesday night",
+  "dc-playoff": "Capitals playoff game (no Commanders)",
+  "two-locks": "Commanders + Capitals playoff at once",
+  "super-bowl": "Commanders in the Super Bowl"
+};
+
+function generateMockGames(scenario = "tuesday") {
   const now = new Date();
   const mockGames = [
     // Washington Capitals vs Pittsburgh Penguins (Lock list team, in progress)
@@ -181,6 +218,7 @@ function generateMockGames() {
       awayScore: 3,
       gameStatus: "in_progress",
       period: 7,
+      inningHalf: "top",
       gameClock: "0:00",
       gamePhase: 0.76,
       isPlayoff: false,
@@ -215,8 +253,8 @@ function generateMockGames() {
     {
       id: "espn_401465005",
       sport: "CFB",
-      homeTeam: "Ohio State",
-      awayTeam: "Michigan State",
+      homeTeam: "Ohio State Buckeyes",
+      awayTeam: "Michigan State Spartans",
       homeTeamRank: 4,
       awayTeamRank: 18,
       homeScore: 28,
@@ -236,8 +274,8 @@ function generateMockGames() {
     {
       id: "espn_401465006",
       sport: "CBB",
-      homeTeam: "Georgetown",
-      awayTeam: "Villanova",
+      homeTeam: "Georgetown Hoyas",
+      awayTeam: "Villanova Wildcats",
       homeTeamRank: null,
       awayTeamRank: null,
       homeScore: 52,
@@ -255,16 +293,30 @@ function generateMockGames() {
     }
   ];
 
+  let games = mockGames;
+  const caps = games.find(g => g.homeTeam === "Washington Capitals");
+  const commanders = games.find(g => g.homeTeam === "Washington Commanders");
+  if (scenario === "dc-playoff" || scenario === "two-locks") {
+    Object.assign(caps, { isPlayoff: true, playoffRound: "conf_semi" });
+  }
+  if (scenario === "dc-playoff") {
+    games = games.filter(g => g !== commanders);
+  }
+  if (scenario === "super-bowl") {
+    Object.assign(commanders, {
+      awayTeam: "Kansas City Chiefs", isPlayoff: true, playoffRound: "championship", eventName: "Super Bowl"
+    });
+  }
+
   return {
-    games: mockGames,
+    games,
     errors: [],
     timestamp: now.toISOString(),
-    count: mockGames.length
+    count: games.length
   };
 }
 
-async function fetchGames() {
-  // PHASE 1: Return mock data
-  // TODO: Replace with live ESPN API calls after testing
-  return generateMockGames();
+async function fetchGames(scenario) {
+  // Mock data until live ESPN integration
+  return generateMockGames(scenario);
 }

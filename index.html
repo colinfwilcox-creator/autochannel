@@ -13,7 +13,7 @@
       <p id="status" class="status-line">Initializing...</p>
     </div>
     <div class="venue-info">
-      <span class="venue-name">Barking Dog, Bethesda MD</span>
+      <span class="venue-name" id="venue-name">Barking Dog, Bethesda MD</span>
       <span class="refresh-indicator">Live • Updates every 60s</span>
     </div>
   </header>
@@ -26,12 +26,15 @@
 
   <!-- Load config first -->
   <script src="config/venue.js"></script>
+  <script src="config/markets.js"></script>
+  <script src="config/national.js"></script>
+  <script src="config/sports.js"></script>
 
   <!-- Load modules -->
   <script src="modules/fetcher.js"></script>
   <script src="modules/scorer.js"></script>
+  <script src="modules/venue.js"></script>
   <script src="modules/display.js"></script>
-  <script src="config/sports.js"></script>
 
   <!-- Load main app logic last -->
   <script src="app.js"></script>

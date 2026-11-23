@@ -272,11 +272,18 @@ function isPreGame(game) {
   return game.gameStatus === "scheduled" || game.gameStatus === "pre_game" || game.espnState === "pre";
 }
 
-// "Bengals @ Commanders · 14–10 · Q2 4:12" or "Bengals @ Commanders · 8:15 PM"
+// "ESPN · Bengals @ Commanders · 14–10 · Q2 4:12" or "ESPN · Bengals @ Commanders · 8:15 PM"
 function gameLine(game) {
-  if (isPreGame(game)) return `${matchupText(game)} · ${formatStartTime(game)}`;
+  const ch = game.displayChannel ? `${game.displayChannel} · ` : "";
+  if (isPreGame(game)) return `${ch}${matchupText(game)} · ${formatStartTime(game)}`;
   const clock = formatCompactClock(game);
-  return `${matchupText(game)} · ${game.awayScore}–${game.homeScore}${clock ? ` · ${clock}` : ""}`;
+  return `${ch}${matchupText(game)} · ${game.awayScore}–${game.homeScore}${clock ? ` · ${clock}` : ""}`;
+}
+
+// "ESPN · Pardon the Interruption", "Golf Channel", or the venue's own pick.
+function programLine(p) {
+  if (!p) return "Your choice (no unused sports channel)";
+  return p.show && p.show !== p.channel ? `${p.channel} · ${p.show}` : p.channel;
 }
 
 function renderSimple() {
@@ -304,7 +311,7 @@ function renderSimple() {
 
   for (const tv of venue.tvs) {
     const game = (tv.role === "anchor" ? assignments.anchors : assignments.secondaries)[tv.id];
-    const channel = assignments.fallbackChannels[tv.id];
+    const program = assignments.programming[tv.id];
     const li = document.createElement("li");
     li.className = `tv-row${tv.role === "anchor" ? " is-main" : ""}`;
     const label = document.createElement("span");
@@ -312,7 +319,8 @@ function renderSimple() {
     label.textContent = `TV ${tv.number}${tv.role === "anchor" ? " · Main" : ""}`;
     const what = document.createElement("span");
     what.className = "tv-row-game";
-    what.textContent = game ? gameLine(game) : (channel || "—");
+    what.textContent = game ? gameLine(game) : programLine(program);
+    if (!game) li.classList.add("is-program");
     if (game) li.dataset.gameId = game.id;
     li.append(label, document.createTextNode(" — "), what);
     list.appendChild(li);
@@ -326,7 +334,7 @@ function renderSimple() {
       const time = document.createElement("span");
       time.className = "up-next-time";
       time.textContent = formatStartTime(g);
-      li.append(time, document.createTextNode(` ${matchupText(g)}`));
+      li.append(time, document.createTextNode(` ${g.displayChannel ? g.displayChannel + " · " : ""}${matchupText(g)}`));
       upList.appendChild(li);
     }
   }
@@ -364,7 +372,7 @@ function renderDetails() {
   const summary = document.createElement("p");
   summary.className = "details-summary";
   summary.textContent = `${venue.venueName} · ${venue.marketName} · ${venue.tvs.length} TVs (${venue.anchors.length} anchor / ${venue.secondaries.length} secondary) · ` +
-    `games: ${c.eligible} eligible, ${c.filler} filler, ${c.excluded} excluded · TVs filled from: ${assignments.poolTier}`;
+    `games: ${c.unavailable} not available in market, ${c.eligible} eligible, ${c.filler} filler, ${c.excluded} excluded · TVs filled from: ${assignments.poolTier}`;
   dashboard.appendChild(summary);
   dashboard.appendChild(createTogglePanel());
 
@@ -380,7 +388,7 @@ function renderDetails() {
   for (const tv of venue.anchors) {
     anchorsContainer.appendChild(createTVCard(tv, assignments.anchors[tv.id], {
       isRepeat: assignments.repeatMap[tv.id],
-      fallbackChannel: assignments.fallbackChannels[tv.id]
+      program: assignments.programming[tv.id]
     }));
   }
   anchorsSection.appendChild(anchorsContainer);
@@ -402,7 +410,7 @@ function renderDetails() {
         isSaturated: assignments.saturationMap[tv.id],
         isGuaranteed: assignments.guaranteedMap[tv.id],
         isRepeat: assignments.repeatMap[tv.id],
-        fallbackChannel: assignments.fallbackChannels[tv.id]
+        program: assignments.programming[tv.id]
       }));
     }
     secondariesSection.appendChild(secondariesContainer);
@@ -435,7 +443,14 @@ function createMarketPicker() {
   return box;
 }
 
-const TIER_ORDER = { eligible: 0, filler: 1, excluded: 2 };
+const TIER_ORDER = { eligible: 0, filler: 1, excluded: 2, unavailable: 3 };
+const TIER_LABEL = { eligible: "eligible", filler: "filler", excluded: "excluded", unavailable: "not available in market" };
+
+function channelSummary(g) {
+  if (g.displayChannel) return g.displayChannel + (g.channelSource === "regional" ? " (regional)" : "");
+  const on = [...(g.nationalChannels || []), ...(g.regionalChannels || []).map(r => r.channel), ...(g.streamingChannels || [])];
+  return on.length ? on.join(", ") : "—";
+}
 
 function createScoresTable() {
   const scoresSection = document.createElement("div");
@@ -447,11 +462,12 @@ function createScoresTable() {
     (TIER_ORDER[a.tier] - TIER_ORDER[b.tier]) || ((b.channelScore ?? -1) - (a.channelScore ?? -1)));
   const num = (v, d = 1) => (typeof v === "number" ? v.toFixed(d) : "—");
   scoresContainer.innerHTML = "<table>" +
-    "<thead><tr><th>Tier</th><th>Sport</th><th>Matchup</th><th>Score</th><th>Clock</th><th>Now?</th><th>Base</th><th>Relevance</th><th>Vitality</th><th>Channel Score</th><th>State</th><th>Why</th></tr></thead>" +
+    "<thead><tr><th>Tier</th><th>Channel</th><th>Sport</th><th>Matchup</th><th>Score</th><th>Clock</th><th>Now?</th><th>Base</th><th>Relevance</th><th>Vitality</th><th>Channel Score</th><th>State</th><th>Why</th></tr></thead>" +
     "<tbody>" +
     rows.map(g => `
       <tr class="tier-row tier-${g.tier}">
-        <td><span class="tier-label ${g.tier}">${g.tier}</span></td>
+        <td><span class="tier-label ${g.tier}">${TIER_LABEL[g.tier]}</span></td>
+        <td>${escapeHtml(channelSummary(g))}</td>
         <td class="sport-badge ${g.sport.toLowerCase()}">${g.sport}</td>
         <td>${escapeHtml(g.awayTeam)} @ ${escapeHtml(g.homeTeam)}</td>
         <td>${g.awayScore}-${g.homeScore}</td>
@@ -555,6 +571,10 @@ function createSetupPanel(open) {
         <div class="setup-hint">National draws 40 · national programs 35 · everyone else 15</div>
       </div>
     </div>
+    <div class="setup-block">
+      <div class="setup-label">Regional channels in this market (rsns)</div>
+      <div class="setup-hint">${venue.market.rsns && venue.market.rsns.length ? venue.market.rsns.map(escapeHtml).join(" · ") : "None listed: only national-channel games are available here."}</div>
+    </div>
     ${flags ? `<details class="setup-flags"><summary>${venue.market.flags.length} flagged team${venue.market.flags.length === 1 ? "" : "s"} in this market</summary><ul>${flags}</ul></details>` : ""}
   `;
 
@@ -630,7 +650,7 @@ function createTogglePanel() {
       <span class="game-info">
         <span class="sport-badge-small ${game.sport.toLowerCase()}">${game.sport}</span>
         <span class="matchup-text">${escapeHtml(game.awayTeam)} @ ${escapeHtml(game.homeTeam)}</span>
-        <span class="tier-label ${game.tier}">${game.tier}</span>
+        <span class="tier-label ${game.tier}">${TIER_LABEL[game.tier]}</span>
         <span class="score-text">${game.awayScore}-${game.homeScore}</span>
         <span class="channel-score-small">${typeof game.channelScore === "number" ? game.channelScore.toFixed(1) : "—"}</span>
       </span>`;
@@ -643,19 +663,20 @@ function createTogglePanel() {
 }
 
 function createTVCard(tv, game, opts) {
-  const { isSaturated = false, isGuaranteed = false, isRepeat = false, fallbackChannel = null } = opts;
+  const { isSaturated = false, isGuaranteed = false, isRepeat = false, program = null } = opts;
   const card = document.createElement("div");
   let cardClass = `tv-card tv-${tv.role}`;
   if (tv.isDiehard) cardClass += " tv-diehard";
-  if (!game && fallbackChannel) cardClass += " tv-fallback";
+  if (!game) cardClass += " tv-fallback";
   card.className = cardClass;
 
   const title = `${tv.label.toUpperCase()}${tv.isDiehard ? " — Diehard" : ""} <span class="tv-number">TV ${tv.number}</span>`;
 
   if (!game) {
-    const fallbackDisplay = fallbackChannel
-      ? `<div class="fallback-content"><span class="fallback-label">📺</span><span class="fallback-channel">${escapeHtml(fallbackChannel)}</span></div>`
-      : `<div class="no-content">Empty</div>`;
+    const fallbackDisplay = program
+      ? `<div class="fallback-content"><span class="fallback-label">📺 ${program.source === "grid" ? `grid · priority ${program.priority}${program.verify ? " · verify" : ""}` : "always-available"}</span>
+           <span class="fallback-channel">${escapeHtml(program.channel)}</span>${program.show && program.show !== program.channel ? `<span class="program-show">${escapeHtml(program.show)}</span>` : ""}</div>`
+      : `<div class="no-content">No unused sports channel — venue's choice</div>`;
     card.innerHTML = `<div class="tv-id">${title}</div>${fallbackDisplay}`;
     return card;
   }
@@ -685,7 +706,7 @@ function createTVCard(tv, game, opts) {
       </div>
     </div>
     <div class="game-meta">
-      <div class="status">${escapeHtml(game.gameStatus)} • ${escapeHtml(formatGameClock(game))}</div>
+      <div class="status">${escapeHtml(game.displayChannel || "")}${game.channelSource === "regional" ? " (regional)" : ""} • ${escapeHtml(game.gameStatus)} • ${escapeHtml(formatGameClock(game))}</div>
       <div class="scores">
         <span class="label">Channel Score:</span>
         <span class="value">${game.channelScore.toFixed(1)}</span>

@@ -8,7 +8,7 @@ const vm = require("vm");
 const root = path.join(__dirname, "..");
 const marketId = process.argv[2] || "washington-dc";
 const ctx = vm.createContext({ console, Date, Math, URL, Intl, fetch, AbortController, setTimeout, clearTimeout });
-for (const f of ["config/venue.js", "config/markets.js", "config/national.js", "config/live.js",
+for (const f of ["config/venue.js", "config/markets.js", "config/national.js", "config/live.js", "config/channels.js", "config/programming.js",
                  "modules/fetcher.js", "modules/scorer.js", "modules/venue.js", "modules/eligibility.js", "modules/display.js", "config/zip-markets.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
 }
@@ -25,7 +25,7 @@ const h = t => console.log(`\n=== ${t} ===`);
   const data = await run("fetchLiveGames()");
   console.table(data.leagues.map(l => ({
     league: l.sport, returned: l.returned, "live/upcoming": l.games.length,
-    "dropped (final / >12h out)": l.filteredOut, failed: l.failures.length, warnings: l.warnings.length
+    "dropped (final / >24h out)": l.filteredOut, failed: l.failures.length, warnings: l.warnings.length
   })));
   data.errors.forEach(e => console.log(`  FETCH ERROR ${e.sport}: ${e.message}`));
   const live = data.games.filter(g => g.espnState === "in").length;

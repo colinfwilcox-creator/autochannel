@@ -814,3 +814,9 @@ main { max-width: 720px; }
 .tier-label.excluded { background: rgba(127, 127, 127, 0.2); color: #999; }
 .tier-row.tier-excluded td { color: #777; }
 .tier-reason { font-size: 11px; color: #888; }
+
+/* ---------- Phase 6: channels ---------- */
+.tv-row.is-program .tv-row-game { color: #9fb3c8; }
+.program-show { display: block; font-size: 12px; color: #aaa; margin-top: 4px; }
+.tier-label.unavailable { background: rgba(127, 127, 127, 0.12); color: #888; }
+.tier-row.tier-unavailable td { color: #666; }

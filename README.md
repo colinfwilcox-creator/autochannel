@@ -11,7 +11,7 @@ The dashboard is a static site with no build step, served by GitHub Pages from `
 | `index.html` | Page shell, **`APP_VERSION`**, and the versioned loader for every CSS/JS file |
 | `app.js` | Dashboard UI: setup panel, Live/Mock toggle, TV cards |
 | `styles.css` | All styles |
-| `config/` | Venue presets, market tables, national lists, live-feed settings (`live.js` holds `PROXY_BASE_URL`) |
+| `config/` | Venue presets, market tables (incl. each market's regional channels, `rsns`), national lists, ZIP → market table, national channel list and ESPN aliases (`channels.js`), programming grid for leftover TVs (`programming.js`, every entry `verify: true`), live-feed settings (`live.js` holds `PROXY_BASE_URL`) |
 | `modules/` | Fetcher/normalizer, scorer, venue builder, TV assignment engine |
 | `proxy/` | Cloudflare Worker that proxies ESPN scoreboards (deployed separately) |
 | `tests/` | Node checks (see below) |

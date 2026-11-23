@@ -10,14 +10,7 @@ const VENUE_DEFAULTS = {
     completionProtectionPhase: 0.85,
     manualOverrideLockSeconds: 1800,
     lockLeadMinutes: 30
-  },
-  fallbackChannels: [
-    "NFL Network",
-    "MLB Network",
-    "NHL Network",
-    "Golf Channel",
-    "ESPN News"
-  ]
+  }
 };
 
 const VENUE_PRESETS = {

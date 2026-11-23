@@ -85,6 +85,14 @@ function getAnchorState(game, venue, lockedIds, history) {
   return "active";
 }
 
+// ---------- Share caps (Phase 6 §3, non-lock games) ----------
+// ChannelScore ≥ 55: ≤ 70% of TVs; 35–55: ≤ 40%; < 35: 1 TV. Rounded down, minimum 1.
+function shareCap(game, totalTVs) {
+  if (game.channelScore >= 55) return Math.max(1, Math.floor(totalTVs * 0.7));
+  if (game.channelScore >= 35) return Math.max(1, Math.floor(totalTVs * 0.4));
+  return 1;
+}
+
 // ---------- 3. Assignment ----------
 
 function assignAnchors(candidates, venue) {
@@ -115,6 +123,11 @@ function assignAnchors(candidates, venue) {
       featured = candidates[1];
       rest = [candidates[0], ...candidates.slice(2)];
       mode = "2-1 (NFL flip)";
+    }
+    // The featured game takes two anchors, so its share cap must allow 2 TVs.
+    if (shareCap(featured, venue.tvs.length) < 2) {
+      anchors.forEach((tv, i) => { out[tv.id] = candidates[i] || null; });
+      return { assignments: out, mode: anchors.map(() => "1").join("-") + " (2-1 capped)" };
     }
     out[anchors[0].id] = featured;
     out[anchors[A - 1].id] = featured;
@@ -235,78 +248,130 @@ function createTVAssignments(scoredGames, lockResult, venue, history = createAnc
   };
 }
 
-// Fill TVs still empty after normal assignment by repeating the pool's best games,
-// spread out: #1 gets the first extra TV, then #2, and so on (Phase 5 §5.3).
-// The primary lock game's share is set by saturation, so it is not repeated —
-// unless it is the only game in the pool.
-function fillRepeats(a, venue) {
-  a.repeatMap = {};
+function tvMap(a, tv) {
+  return tv.role === "anchor" ? a.anchors : a.secondaries;
+}
+
+function emptyTVs(a, venue) {
+  return venue.tvs.filter(tv => !tvMap(a, tv)[tv.id]);
+}
+
+function tvCountsByGame(a) {
+  const counts = new Map();
+  [...Object.values(a.anchors), ...Object.values(a.secondaries)].forEach(g => {
+    if (g) counts.set(g.id, (counts.get(g.id) || 0) + 1);
+  });
+  return counts;
+}
+
+// Fill empty TVs with `ranked` games (best first), round-robin — #1 gets the first
+// free TV, then #2, … then #1 again — each game up to its share cap. Anchors never
+// take a demoted game. The primary lock game is never added here (saturation sets
+// its share). Marks TVs a game already had as repeats.
+function fillWithCaps(a, venue, ranked, tier) {
+  const N = venue.tvs.length;
   const lockId = a.lockGame ? a.lockGame.id : null;
-  let ranking = a.allGames
-    .filter(g => !INACTIVE_STATUSES.has(g.gameStatus))
-    .sort((x, y) => y.channelScore - x.channelScore);
-  const withoutLock = ranking.filter(g => g.id !== lockId);
-  if (withoutLock.length) ranking = withoutLock;
-  if (!ranking.length) return;
-  let next = 0;
-  for (const tv of venue.tvs) {
-    const map = tv.role === "anchor" ? a.anchors : a.secondaries;
-    if (map[tv.id]) continue;
-    // Anchors never take a demoted game.
-    const options = tv.role === "anchor" ? ranking.filter(g => g.anchorState !== "demoted") : ranking;
-    if (!options.length) continue;
-    const pick = options[next % options.length];
-    next++;
-    map[tv.id] = pick;
-    a.repeatMap[tv.id] = true;
+  const games = ranked.filter(g => g.id !== lockId && !INACTIVE_STATUSES.has(g.gameStatus));
+  const counts = tvCountsByGame(a);
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const g of games) {
+      if ((counts.get(g.id) || 0) >= shareCap(g, N)) continue;
+      const tv = emptyTVs(a, venue).find(t => !(t.role === "anchor" && g.anchorState === "demoted"));
+      if (!tv) return;
+      if (counts.get(g.id)) a.repeatMap[tv.id] = true;
+      tvMap(a, tv)[tv.id] = g;
+      a.tierMap[tv.id] = tier;
+      counts.set(g.id, (counts.get(g.id) || 0) + 1);
+      progress = true;
+    }
   }
 }
 
-// Full cycle (Phase 5): classify → watchable now → pool (eligible, else filler)
-// → locks (identity) → score → assign → repeats → fallback channels.
+// Sports with a game on today's (US Eastern) slate, for gameDayOnly grid entries.
+function sportsWithGamesToday(games, now) {
+  const today = easternDateStamp(now);
+  const set = new Set();
+  games.forEach(g => {
+    if (g.espnState === "in" || (g.scheduledStartTime && easternDateStamp(new Date(g.scheduledStartTime)) === today)) set.add(g.sport);
+  });
+  return set;
+}
+
+// Leftover TVs → programming grid (airing now, by priority), then the always-available
+// list. No channel is used twice by non-game TVs, and a channel already carrying a
+// game on some TV isn't reused. TVs that still have nothing are left to the venue.
+function assignProgramming(a, venue, now, sportsToday) {
+  a.programming = {};
+  const used = new Set(
+    [...Object.values(a.anchors), ...Object.values(a.secondaries)].filter(Boolean).map(g => g.displayChannel).filter(Boolean)
+  );
+  const options = [
+    ...programmingAiringNow(now, sportsToday).map(e => ({ channel: e.channel, show: e.show, source: "grid", priority: e.priority, verify: !!e.verify })),
+    ...ALWAYS_AVAILABLE_CHANNELS.map(c => ({ channel: c, show: null, source: "always" }))
+  ];
+  for (const tv of emptyTVs(a, venue)) {
+    const pick = options.find(o => !used.has(o.channel));
+    if (!pick) { a.programming[tv.id] = null; continue; }
+    used.add(pick.channel);
+    a.programming[tv.id] = pick;
+  }
+}
+
+// Full cycle (Phase 6):
+//   availability + tiers → watchable now → lock + saturation → eligible games (caps)
+//   → filler games (caps) → programming grid → always-available channels.
 // `history` (from createAnchorHistory) carries anchor/demotion state between cycles.
 function runAssignmentCycle(games, venue, history = createAnchorHistory(), now = new Date()) {
   const classified = games.map(g => ({ ...g, ...classifyGame(g, venue), watchableNow: isWatchableNow(g, now) }));
   const eligibleNow = classified.filter(g => g.tier === "eligible" && g.watchableNow);
   const fillerNow = classified.filter(g => g.tier === "filler" && g.watchableNow);
+  // Locks, anchors and the first pass run on eligible games; filler only leads when nothing eligible is on.
   const pool = eligibleNow.length ? eligibleNow : fillerNow;
 
   const lockResult = resolveLocks(pool, venue);        // before scoring, by identity
   const scored = scoreGames(pool, venue);
-  const assignments = createTVAssignments(scored, lockResult, venue, history);
-  fillRepeats(assignments, venue);
-  assignments.fallbackChannels = assignFallbackChannels(assignments, venue);
-  assignments.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
+  const a = createTVAssignments(scored, lockResult, venue, history);
+  a.repeatMap = {};
+  a.tierMap = {};
+  venue.tvs.forEach(tv => { const g = tvMap(a, tv)[tv.id]; if (g) a.tierMap[tv.id] = g.tier; });
 
-  // Everything, for the details view. Excluded games are never scored.
-  const inPool = new Map(assignments.allGames.map(g => [g.id, g]));
-  const notInPool = scoreGames(classified.filter(g => g.tier !== "excluded" && !inPool.has(g.id)), venue);
-  const scoredOthers = new Map(notInPool.map(g => [g.id, g]));
-  assignments.catalog = classified.map(g => inPool.get(g.id) || scoredOthers.get(g.id) || g);
-  assignments.tierCounts = { eligible: 0, filler: 0, excluded: 0 };
-  classified.forEach(g => { assignments.tierCounts[g.tier]++; });
-  // Up next: the 5 most relevant eligible games starting later today, shown in start order.
-  // (Picking by start time alone let five early generic games push out e.g. a Commanders game.)
+  // The first pass places each game once; caps also apply to it.
+  const N = venue.tvs.length;
+  const counts = tvCountsByGame(a);
+  const lockId = a.lockGame ? a.lockGame.id : null;
+  venue.tvs.forEach(tv => {
+    const g = tvMap(a, tv)[tv.id];
+    if (!g || g.id === lockId) return;
+    if (counts.get(g.id) > shareCap(g, N)) { tvMap(a, tv)[tv.id] = null; delete a.tierMap[tv.id]; counts.set(g.id, counts.get(g.id) - 1); }
+  });
+
+  const byScore = list => [...list].sort((x, y) => y.channelScore - x.channelScore);
+  fillWithCaps(a, venue, byScore(a.allGames), pool === eligibleNow ? "eligible" : "filler");
+  let fillerScored = [];
+  if (eligibleNow.length && fillerNow.length) {
+    fillerScored = scoreGames(fillerNow, venue).map(g => ({ ...g, anchorState: getAnchorState(g, venue, new Set(), history) }));
+    fillWithCaps(a, venue, byScore(fillerScored), "filler");
+  }
+  assignProgramming(a, venue, now, sportsWithGamesToday(games, now));
+  a.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
+
+  // Everything, for the details view. Unavailable and excluded games are never scored.
+  const scoredById = new Map([...a.allGames, ...fillerScored].map(g => [g.id, g]));
+  const rest = scoreGames(classified.filter(g => (g.tier === "eligible" || g.tier === "filler") && !scoredById.has(g.id)), venue);
+  rest.forEach(g => scoredById.set(g.id, g));
+  a.catalog = classified.map(g => scoredById.get(g.id) || g);
+  a.tierCounts = { unavailable: 0, eligible: 0, filler: 0, excluded: 0 };
+  classified.forEach(g => { a.tierCounts[g.tier]++; });
+  // Up next: the 5 most relevant available eligible games later today, shown in start order.
   const byStart = (x, y) => new Date(x.scheduledStartTime) - new Date(y.scheduledStartTime);
-  assignments.upNext = assignments.catalog
+  a.upNext = a.catalog
     .filter(g => g.tier === "eligible" && isLaterToday(g, now))
     .sort((x, y) => (y.channelScore - x.channelScore) || byStart(x, y))
     .slice(0, 5)
     .sort(byStart);
-  return assignments;
-}
-
-// Fallback channels go on TVs that are still empty, which after repeats means
-// nothing eligible or filler is watchable.
-function assignFallbackChannels(assignments, venue) {
-  const fallbackMap = {};
-  let i = 0;
-  for (const tv of venue.tvs) {
-    const map = tv.role === "anchor" ? assignments.anchors : assignments.secondaries;
-    if (map[tv.id]) continue;
-    fallbackMap[tv.id] = venue.fallbackChannels[i++ % venue.fallbackChannels.length];
-  }
-  return fallbackMap;
+  return a;
 }
 
 // Count how many TVs a game is on: { anchors, secondaries, total }.

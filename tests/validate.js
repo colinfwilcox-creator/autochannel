@@ -6,7 +6,7 @@ const vm = require("vm");
 
 const root = path.join(__dirname, "..");
 const ctx = vm.createContext({ console, Date, Math });
-for (const f of ["config/venue.js", "config/markets.js", "config/national.js", "config/live.js",
+for (const f of ["config/venue.js", "config/markets.js", "config/national.js", "config/live.js", "config/channels.js", "config/programming.js",
                  "modules/fetcher.js", "modules/scorer.js", "modules/venue.js", "modules/eligibility.js", "modules/display.js", "config/zip-markets.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
 }
@@ -240,7 +240,8 @@ check(run("Object.keys(MARKETS).every(m => Object.values(ZIP_PREFIX_TO_MARKET).i
 h("P5.2 Eligibility tiers");
 run(`var __dc = buildVenue({ marketId: "washington-dc", totalTVs: 5, anchorTVs: [1] });
   var __g = (o) => ({ id: "t" + Math.random(), sport: "CBB", homeTeam: "A", awayTeam: "B", homeScore: 0, awayScore: 0,
-    gameStatus: "in_progress", gamePhase: 0.5, period: 1, gameClock: "10:00", winProbability: 0.5, ...o });`);
+    gameStatus: "in_progress", gamePhase: 0.5, period: 1, gameClock: "10:00", winProbability: 0.5,
+    nationalChannels: ["ESPN"], regionalChannels: [], streamingChannels: [], ...o });`);
 const tiers = [
   ["NHL any", `{ sport: "NHL", homeTeam: "Utah Mammoth", awayTeam: "Winnipeg Jets" }`, "eligible"],
   ["market team", `{ homeTeam: "Maryland Terrapins", awayTeam: "Coppin State Eagles" }`, "eligible"],
@@ -273,52 +274,115 @@ const wt = [
 ];
 for (const [obj, want, label] of wt) check(run(`isWatchableNow(__g(${obj}), new Date(${now}))`) === want, `${label} → ${want ? "watchable" : "not watchable"}`);
 
-h("P5.4 Filling TVs");
-run(`var __pro = (id, sport, home, away, wp) => __g({ id, sport, homeTeam: home, awayTeam: away, winProbability: wp });`);
-const rep = run(`(() => {
-  const v = buildVenue({ marketId: "washington-dc", totalTVs: 8, anchorTVs: [1, 2] });
-  const games = [__pro("a", "NBA", "Boston Celtics", "Miami Heat", 0.5), __pro("b", "NHL", "Dallas Stars", "Seattle Kraken", 0.7),
-                 __g({ id: "f", homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4" }),
-                 __g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })];
-  const a = runAssignmentCycle(games, v);
-  const order = v.tvs.map(tv => (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id]?.id || "-");
-  return { order, repeats: Object.keys(a.repeatMap).length, pool: a.poolTier, fb: Object.keys(a.fallbackChannels).length };
-})()`);
-console.log(`  8 TVs, 2 eligible + 1 filler + 1 excluded → ${rep.order.join(" ")} (repeats ${rep.repeats})`);
-check(rep.pool === "eligible" && !rep.order.includes("f") && !rep.order.includes("x"), "filler and excluded unused while eligible games are watchable");
-check(rep.order.every(x => x === "a" || x === "b") && rep.fb === 0, "empty TVs repeat eligible games; no fallback channels");
-const counts = rep.order.reduce((m, x) => (m[x] = (m[x] || 0) + 1, m), {});
-check(Math.abs(counts.a - counts.b) <= 1, `repeats are spread (a ${counts.a}, b ${counts.b})`);
+// ---------- Phase 6 ----------
+h("P6.1 Channels from ESPN broadcasts");
+const tv1 = run(`parseBroadcasts({ geoBroadcasts: [
+    { type: { shortName: "TV" }, market: { type: "National" }, media: { shortName: "NHL Net" } },
+    { type: { shortName: "TV" }, market: { type: "Home" }, media: { shortName: "MSG" } },
+    { type: { shortName: "Streaming" }, market: { type: "National" }, media: { shortName: "ESPN+" } },
+    { type: { shortName: "Radio" }, market: { type: "Away" }, media: { shortName: "WBNS" } },
+    { type: { shortName: "TV" }, market: { type: "Away" }, media: { shortName: "MNMT" } }
+  ] }, "New Jersey Devils", "Washington Capitals")`);
+check(JSON.stringify(tv1.nationalChannels) === '["NHL Network"]', `national "NHL Net" → NHL Network (${tv1.nationalChannels})`);
+check(tv1.regionalChannels.length === 2 && tv1.regionalChannels[0].channel === "MSG" && tv1.regionalChannels[0].team === "New Jersey Devils"
+  && tv1.regionalChannels[1].channel === "Monumental Sports Network" && tv1.regionalChannels[1].side === "away",
+  `regional channels keep their team's market: ${tv1.regionalChannels.map(r => r.channel + "/" + r.side).join(", ")}`);
+check(tv1.streaming.includes("ESPN+") && !tv1.nationalChannels.includes("ESPN+"), "ESPN+ (Streaming) is not a TV channel; radio ignored");
+const tv2 = run(`parseBroadcasts({ broadcasts: [{ market: "national", names: ["Fox", "Peacock"] }] }, "H", "A")`);
+check(JSON.stringify(tv2.nationalChannels) === '["FOX"]' && tv2.streaming.includes("Peacock"), "falls back to `broadcasts`; Peacock treated as streaming");
 
-const fil = run(`(() => {
-  const noon = new Date(); noon.setHours(12, 0, 0, 0);          // fixed clock: "later today" is well defined
-  const v = buildVenue({ marketId: "washington-dc", totalTVs: 4, anchorTVs: [1] });
-  const at = h => new Date(noon.getTime() + h * 3600000).toISOString();
-  const later = (id, h, sport, home, away) => ({ ...__pro(id, sport, home, away, 0.5), gameStatus: "scheduled", espnState: "pre", scheduledStartTime: at(h) });
-  const games = [__g({ id: "f", homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4" }),
-                 __g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" }),
-                 later("n3", 3, "NBA", "Boston Celtics", "Miami Heat"), later("n1", 1, "NHL", "Dallas Stars", "Seattle Kraken"),
-                 later("n2", 2, "NBA", "Utah Jazz", "LA Clippers"), later("n4", 4, "NFL", "Detroit Lions", "Chicago Bears"),
-                 later("n5", 5, "MLB", "Texas Rangers", "Houston Astros"), later("n6", 6, "NHL", "Boston Bruins", "Buffalo Sabres"),
-                 later("tomorrow", 14, "NBA", "Phoenix Suns", "Denver Nuggets"),
-                 later("cmd", 8, "NFL", "Washington Commanders", "Cincinnati Bengals"),
-                 { ...__g({ id: "xl", homeTeam: "Akron Zips", awayTeam: "Kent State Golden Flashes" }), gameStatus: "scheduled", espnState: "pre", scheduledStartTime: at(2) }];
-  const a = runAssignmentCycle(games, v, createAnchorHistory(), noon);
-  const ids = v.tvs.map(tv => (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id]?.id || "-");
-  return { ids, pool: a.poolTier, upNext: a.upNext.map(g => g.id) };
-})()`);
-check(fil.pool === "filler" && fil.ids.every(i => i === "f"), `no eligible game watchable → filler fills the TVs (${fil.ids.join(" ")})`);
-check(!fil.ids.some(i => /^n|^x/.test(i)), "later eligible games and excluded games stay off the TVs");
-check(fil.upNext.length === 5 && fil.upNext.includes("cmd"), `Up next keeps the 5 most relevant later games, incl. the 8h-away Commanders game (${fil.upNext.join(", ")})`);
-check(fil.upNext.every(i => /^(n\d|cmd)$/.test(i)), "Up next has no tomorrow, filler or excluded games");
-check(fil.upNext.indexOf("cmd") === 4, "Up next is listed in start-time order (Commanders, latest, is last)");
+h("P6.2 Availability in market");
+run(`var __stl = buildVenue({ marketId: "st-louis", totalTVs: 5 });
+  var __caps = __g({ sport: "NHL", homeTeam: "Washington Capitals", awayTeam: "Pittsburgh Penguins", nationalChannels: [],
+    regionalChannels: [{ channel: "Monumental Sports Network", side: "home", team: "Washington Capitals" }] });`);
+const av = [
+  ["ESPN game", "__g({ sport: 'NBA', homeTeam: 'Utah Jazz', awayTeam: 'Phoenix Suns' })", "__dc", true, "ESPN"],
+  ["Capitals on Monumental, DC", "__caps", "__dc", true, "Monumental Sports Network"],
+  ["Capitals on Monumental, St. Louis", "__caps", "__stl", false, null],
+  ["Orioles on MASN, DC", "__g({ sport: 'MLB', homeTeam: 'Baltimore Orioles', awayTeam: 'New York Yankees', nationalChannels: [], regionalChannels: [{ channel: 'MASN', side: 'home', team: 'Baltimore Orioles' }] })", "__dc", true, "MASN"],
+  ["ESPN+ only", "__g({ sport: 'NHL', homeTeam: 'Calgary Flames', awayTeam: 'Ottawa Senators', nationalChannels: [], streamingChannels: ['ESPN+'] })", "__dc", false, null],
+  ["NBCSN (not on the national list)", "__g({ sport: 'NBA', homeTeam: 'Minnesota Timberwolves', awayTeam: 'Brooklyn Nets', nationalChannels: ['NBCSN'] })", "__dc", false, null],
+  ["no TV listed", "__g({ sport: 'NBA', homeTeam: 'X', awayTeam: 'Y', nationalChannels: [] })", "__dc", false, null]
+];
+for (const [label, g, v, want, ch] of av) {
+  const r = run(`classifyGame(${g}, ${v})`);
+  check((r.tier !== "unavailable") === want && (r.displayChannel || null) === ch,
+    `${label}: ${r.tier === "unavailable" ? r.tierReason : "available on " + r.displayChannel}`);
+}
 
-const fb = run(`(() => {
-  const v = buildVenue({ marketId: "washington-dc", totalTVs: 3, anchorTVs: [1] });
-  const a = runAssignmentCycle([__g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })], v);
-  return { pool: a.poolTier, fb: Object.values(a.fallbackChannels) };
+h("P6.3 Share caps");
+const caps = [[60, 15, 10], [55, 15, 10], [54.9, 15, 6], [35, 15, 6], [34.9, 15, 1], [60, 5, 3], [40, 5, 2], [60, 2, 1], [60, 1, 1], [40, 1, 1]];
+for (const [cs, n, want] of caps) check(run(`shareCap({ channelScore: ${cs} }, ${n})`) === want, `ChannelScore ${cs}, ${n} TVs → at most ${want}`);
+
+h("P6.4 Fill order: lock → eligible (caps) → filler (caps) → programming → always-available");
+run(`var __at = iso => new Date(iso);
+  var __mon430 = __at("2026-11-23T21:30:00Z");   // Mon 4:30 PM ET
+  var __layout = (a, v) => v.tvs.map(tv => { const g = (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id];
+    return g ? { kind: "game", id: g.id, channel: g.displayChannel } : a.programming[tv.id] ? { kind: "prog", channel: a.programming[tv.id].channel, src: a.programming[tv.id].source } : { kind: "none" }; });`);
+const mix = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 12 });
+  const games = [
+    __g({ id: "a", sport: "NBA", homeTeam: "Boston Celtics", awayTeam: "Miami Heat", nationalChannels: ["ESPN"] }),
+    __g({ id: "b", sport: "NHL", homeTeam: "Dallas Stars", awayTeam: "Seattle Kraken", nationalChannels: ["TNT"], winProbability: 0.9 }),
+    __g({ id: "f", homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4", nationalChannels: ["SEC Network"],
+      homeScore: 80, awayScore: 50, gamePhase: 0.9, winProbability: 0.99 }),
+    __g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals", nationalChannels: ["ESPN2"] }),
+    __g({ id: "u", sport: "NHL", homeTeam: "Calgary Flames", awayTeam: "Ottawa Senators", nationalChannels: [], streamingChannels: ["ESPN+"] })];
+  const a = runAssignmentCycle(games, v, createAnchorHistory(), __mon430);
+  const cs = Object.fromEntries(a.catalog.filter(g => typeof g.channelScore === "number").map(g => [g.id, g.channelScore]));
+  return { layout: __layout(a, v), cs, tiers: Object.fromEntries(a.catalog.map(g => [g.id, g.tier])) };
 })()`);
-check(fb.pool === "none" && fb.fb.length === 3, `nothing eligible/filler watchable → fallback channels on all TVs (${fb.fb.join(", ")})`);
+const cnt = id => mix.layout.filter(l => l.kind === "game" && l.id === id).length;
+const capOf = id => run(`shareCap({ channelScore: ${mix.cs[id]} }, 12)`);
+console.log(`  12 TVs: ${mix.layout.map(l => l.kind === "game" ? l.id : l.kind === "prog" ? "[" + l.channel + "]" : "-").join(" ")}`);
+console.log(`  ChannelScores: a ${mix.cs.a.toFixed(1)} (cap ${capOf("a")}), b ${mix.cs.b.toFixed(1)} (cap ${capOf("b")}), f ${mix.cs.f.toFixed(1)} (cap ${capOf("f")})`);
+check(cnt("a") === capOf("a") && cnt("b") === capOf("b"), "each eligible game fills up to its share cap");
+check(cnt("f") === Math.min(capOf("f"), 12 - cnt("a") - cnt("b")) && cnt("f") >= 1, "filler fills after eligible games hit their caps, within its own cap");
+check(cnt("x") === 0 && cnt("u") === 0 && mix.tiers.u === "unavailable" && mix.tiers.x === "excluded", "excluded and unavailable games never go on a TV");
+const progCh = mix.layout.filter(l => l.kind === "prog").map(l => l.channel);
+const gameCh = new Set(mix.layout.filter(l => l.kind === "game").map(l => l.channel));
+check(new Set(progCh).size === progCh.length, `no two programmed TVs share a channel (${progCh.join(", ")})`);
+check(progCh.every(c => !gameCh.has(c)), "programming never reuses a channel that carries a game on another TV");
+const firstProg = mix.layout.findIndex(l => l.kind === "prog"), lastGame = mix.layout.map(l => l.kind).lastIndexOf("game");
+check(firstProg > lastGame, "programming only on TVs left after games");
+
+const lone = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 5 });
+  const g = __g({ id: "c", homeTeam: "Clemson Tigers", awayTeam: "Ole Miss Rebels", homeScore: 51, awayScore: 75, gamePhase: 0.9, winProbability: 0.99, nationalChannels: ["ACC Network"] });
+  const a = runAssignmentCycle([g], v, createAnchorHistory(), __mon430);
+  return { layout: __layout(a, v), cs: a.allGames[0].channelScore };
+})()`);
+console.log(`  lone blowout (CS ${lone.cs.toFixed(1)}), 5 TVs, Mon 4:30 PM: ${lone.layout.map(l => l.kind === "game" ? l.id + "@" + l.channel : "[" + l.channel + "]").join(" ")}`);
+check(lone.layout.filter(l => l.kind === "game").length === 1, "a ChannelScore < 35 game gets exactly 1 TV");
+check(lone.layout.filter(l => l.kind === "prog").length === 4, "the other 4 TVs get programming");
+
+const lockRun = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 15 });
+  const a = runAssignmentCycle(generateMockGames("tuesday").games, v, createAnchorHistory());
+  return { lock: a.lockGame && a.lockGame.homeTeam, tvs: countTVsForGame(a, a.lockGame.id), sat: a.saturationTarget, A: v.anchors.length };
+})()`);
+check(lockRun.lock === "Washington Commanders" && lockRun.tvs.anchors === lockRun.A && lockRun.tvs.secondaries === lockRun.sat,
+  `lock unchanged by caps: Commanders on ${lockRun.A} main + ${lockRun.sat} saturated = ${lockRun.tvs.total} of 15 TVs`);
+
+const none = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 20 });
+  const a = runAssignmentCycle([__g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })], v, createAnchorHistory(), __mon430);
+  const progs = Object.values(a.programming);
+  return { pool: a.poolTier, chans: progs.filter(Boolean).map(p => p.channel), empty: progs.filter(p => !p).length,
+           srcs: [...new Set(progs.filter(Boolean).map(p => p.source))] };
+})()`);
+check(none.pool === "none" && new Set(none.chans).size === none.chans.length, `nothing watchable → 20 TVs: ${none.chans.length} distinct channels, ${none.empty} left to the venue`);
+check(none.srcs.includes("grid") && none.srcs.includes("always"), "grid entries first, then the always-available list");
+
+h("P6.5 Programming grid");
+const gridBad = run(`PROGRAMMING_GRID.filter(e => !e.channel || !e.show || !e.days.length || e.days.some(d => !ALL_DAYS.includes(d))
+  || toMinutes(e.start) >= toMinutes(e.end) || toMinutes(e.end) > 1440 || e.priority < 1 || e.priority > 100 || e.verify !== true).map(e => e.show)`);
+check(gridBad.length === 0, `every grid entry is well-formed and marked verify (${run("PROGRAMMING_GRID.length")} entries)${gridBad.length ? ": " + gridBad.join(", ") : ""}`);
+const mnf = sports => run(`programmingAiringNow(__at("2026-11-23T23:30:00Z"), new Set(${JSON.stringify(sports)})).map(e => e.show)`);
+check(mnf(["NFL"])[0] === "Monday Night Countdown", `Mon 6:30 PM ET with an NFL game: top entry is ${mnf(["NFL"])[0]}`);
+check(!mnf([]).includes("Monday Night Countdown"), "gameDayOnly: no Monday Night Countdown without an NFL game");
+check(run(`inSeason({ from: "09-01", to: "02-15" }, "01-10") && !inSeason({ from: "09-01", to: "02-15" }, "06-01")`), "seasons that wrap the new year work");
+check(run(`easternClock(__at("2026-11-24T01:30:00Z")).day === "Mon" && easternClock(__at("2026-11-24T01:30:00Z")).minutes === 20 * 60 + 30`), "grid clock is US Eastern (01:30Z Tue = Mon 8:30 PM ET)");
 
 const one = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 1 });

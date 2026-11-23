@@ -116,7 +116,6 @@ function buildVenue(rawSetup) {
     teamTable: buildTeamTable(market),
     baseTeamScore: buildRelevanceLookup(market, setup.adjust || {}),
     lockList: setup.lockListOverride || generateLockList(market),
-    thresholds: { ...VENUE_DEFAULTS.thresholds },
-    fallbackChannels: [...VENUE_DEFAULTS.fallbackChannels]
+    thresholds: { ...VENUE_DEFAULTS.thresholds }
   };
 }

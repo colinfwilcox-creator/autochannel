@@ -1,6 +1,10 @@
 // Phase 3: Market relevance templates (Spec §17.B)
 //
 // Team names must exactly match the fetcher's normalized names (ESPN displayName).
+// `rsns`: regional/local TV channels that serve the market, spelled as ESPN's feed
+// spells them (after CHANNEL_ALIASES). Taken from ESPN feeds: each local channel
+// ESPN listed for the market's teams on 2+ games (NHL/NBA Nov 3–22 2026, MLB
+// Jun 1–10 2026). Markets with [] had no local channel in that sample.
 // `flags` lists every team whose tier (home / regional / college) or exact ESPN
 // name is uncertain. Flagged entries are included in the table unless the flag
 // says "not listed". Review these before relying on a market outside DC.
@@ -23,6 +27,7 @@ function buildTeamTable(m) {
 const MARKETS = {
   "washington-dc": {
     name: "Washington, DC",
+    rsns: ["Monumental Sports Network", "MASN"],
     home: {
       NFL: ["Washington Commanders"],
       NHL: ["Washington Capitals"],
@@ -44,6 +49,7 @@ const MARKETS = {
 
   "baltimore": {
     name: "Baltimore",
+    rsns: ["MASN", "Monumental Sports Network"],
     home: { NFL: ["Baltimore Ravens"], MLB: ["Baltimore Orioles"] },
     college: [{ name: "Maryland Terrapins", tier: "flagship" }],
     regional: [
@@ -60,6 +66,7 @@ const MARKETS = {
 
   "new-york": {
     name: "New York",
+    rsns: ["MSG", "MSGSN", "MSG2", "SNY", "YES"],
     home: {
       NFL: ["New York Giants", "New York Jets"],
       NHL: ["New York Rangers", "New York Islanders", "New Jersey Devils"],
@@ -84,6 +91,7 @@ const MARKETS = {
 
   "boston": {
     name: "Boston",
+    rsns: ["NESN"],
     home: {
       NFL: ["New England Patriots"],
       NHL: ["Boston Bruins"],
@@ -101,6 +109,7 @@ const MARKETS = {
 
   "philadelphia": {
     name: "Philadelphia",
+    rsns: ["NBC Sports Phil"],
     home: {
       NFL: ["Philadelphia Eagles"],
       NHL: ["Philadelphia Flyers"],
@@ -123,6 +132,7 @@ const MARKETS = {
 
   "pittsburgh": {
     name: "Pittsburgh",
+    rsns: [],
     home: { NFL: ["Pittsburgh Steelers"], NHL: ["Pittsburgh Penguins"], MLB: ["Pittsburgh Pirates"] },
     college: [
       { name: "Pittsburgh Panthers", tier: "flagship" },
@@ -130,22 +140,26 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Pittsburgh Panthers / Penn State Nittany Lions", issue: "Unclear which is the flagship in Pittsburgh." }
     ]
   },
 
   "cleveland": {
     name: "Cleveland",
+    rsns: [],
     home: { NFL: ["Cleveland Browns"], MLB: ["Cleveland Guardians"], NBA: ["Cleveland Cavaliers"] },
     college: [{ name: "Ohio State Buckeyes", tier: "flagship" }],
     regional: [{ name: "Columbus Blue Jackets", sport: "NHL" }],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Columbus Blue Jackets", issue: "Listed as regional (Cleveland has no NHL team). Unsure it's the same media region." }
     ]
   },
 
   "cincinnati": {
     name: "Cincinnati",
+    rsns: [],
     home: { NFL: ["Cincinnati Bengals"], MLB: ["Cincinnati Reds"], MLS: ["FC Cincinnati"] },
     college: [
       { name: "Cincinnati Bearcats", tier: "flagship" },
@@ -155,6 +169,7 @@ const MARKETS = {
     ],
     regional: [{ name: "Columbus Blue Jackets", sport: "NHL" }],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Cincinnati Bearcats", issue: "Flagship vs Ohio State uncertain." },
       { team: "Ohio State Buckeyes", issue: "Tier uncertain (secondary here vs flagship)." },
       { team: "Kentucky Wildcats", issue: "Across the river. Tier uncertain." },
@@ -164,6 +179,7 @@ const MARKETS = {
 
   "columbus": {
     name: "Columbus",
+    rsns: ["CBJNHL", "WWHO"],
     home: { NHL: ["Columbus Blue Jackets"], MLS: ["Columbus Crew"] },
     college: [{ name: "Ohio State Buckeyes", tier: "flagship" }],
     regional: [
@@ -181,6 +197,7 @@ const MARKETS = {
 
   "detroit": {
     name: "Detroit",
+    rsns: ["DSN"],
     home: { NFL: ["Detroit Lions"], NHL: ["Detroit Red Wings"], MLB: ["Detroit Tigers"], NBA: ["Detroit Pistons"] },
     college: [
       { name: "Michigan Wolverines", tier: "flagship" },
@@ -194,6 +211,7 @@ const MARKETS = {
 
   "chicago": {
     name: "Chicago",
+    rsns: ["CHSN", "Marquee Sports Net"],
     home: {
       NFL: ["Chicago Bears"],
       NHL: ["Chicago Blackhawks"],
@@ -217,6 +235,7 @@ const MARKETS = {
 
   "milwaukee": {
     name: "Milwaukee",
+    rsns: ["MyMi"],
     home: { NFL: ["Green Bay Packers"], MLB: ["Milwaukee Brewers"], NBA: ["Milwaukee Bucks"] },
     college: [
       { name: "Wisconsin Badgers", tier: "flagship" },
@@ -230,6 +249,7 @@ const MARKETS = {
 
   "minneapolis": {
     name: "Minneapolis–St. Paul",
+    rsns: ["MINNHL"],
     home: {
       NFL: ["Minnesota Vikings"],
       NHL: ["Minnesota Wild"],
@@ -245,6 +265,7 @@ const MARKETS = {
 
   "kansas-city": {
     name: "Kansas City",
+    rsns: [],
     home: { NFL: ["Kansas City Chiefs"], MLB: ["Kansas City Royals"], MLS: ["Sporting Kansas City"] },
     college: [
       { name: "Kansas Jayhawks", tier: "flagship" },
@@ -253,6 +274,7 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Kansas Jayhawks / Missouri Tigers", issue: "Two-state market. Unsure both are flagship." },
       { team: "Kansas State Wildcats", issue: "Tier uncertain." }
     ]
@@ -260,6 +282,7 @@ const MARKETS = {
 
   "st-louis": {
     name: "St. Louis",
+    rsns: ["ABC32"],
     home: { NHL: ["St. Louis Blues"], MLB: ["St. Louis Cardinals"], MLS: ["St. Louis CITY SC"] },
     college: [
       { name: "Missouri Tigers", tier: "flagship" },
@@ -275,6 +298,7 @@ const MARKETS = {
 
   "dallas": {
     name: "Dallas–Fort Worth",
+    rsns: ["KFAA-TV", "Rangers Sports Network"],
     home: {
       NFL: ["Dallas Cowboys"],
       NHL: ["Dallas Stars"],
@@ -298,6 +322,7 @@ const MARKETS = {
 
   "houston": {
     name: "Houston",
+    rsns: ["Space City Home Network"],
     home: { NFL: ["Houston Texans"], MLB: ["Houston Astros"], NBA: ["Houston Rockets"], MLS: ["Houston Dynamo FC"] },
     college: [
       { name: "Texas A&M Aggies", tier: "flagship" },
@@ -313,6 +338,7 @@ const MARKETS = {
 
   "denver": {
     name: "Denver",
+    rsns: ["Altitude Sports", "Altitude 2 Sports", "KTVD-TV (My20)"],
     home: {
       NFL: ["Denver Broncos"],
       NHL: ["Colorado Avalanche"],
@@ -327,6 +353,7 @@ const MARKETS = {
 
   "phoenix": {
     name: "Phoenix",
+    rsns: ["Arizona's Family 3TV"],
     home: {
       NFL: ["Arizona Cardinals"],
       MLB: ["Arizona Diamondbacks"],
@@ -346,10 +373,12 @@ const MARKETS = {
 
   "las-vegas": {
     name: "Las Vegas",
+    rsns: [],
     home: { NFL: ["Las Vegas Raiders"], NHL: ["Vegas Golden Knights"], WNBA: ["Las Vegas Aces"] },
     college: [{ name: "UNLV Rebels", tier: "secondary" }],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Athletics", issue: "Relocating to Las Vegas (in Sacramento for now). Not listed." },
       { team: "UNLV Rebels", issue: "Tier uncertain." }
     ]
@@ -357,6 +386,7 @@ const MARKETS = {
 
   "los-angeles": {
     name: "Los Angeles",
+    rsns: ["Spectrum Sports Net", "SportsNet LA", "KCOP", "Fox 11 Plus", "KTTV", "ABTV", "KTLA"],
     home: {
       NFL: ["Los Angeles Rams", "Los Angeles Chargers"],
       NHL: ["Los Angeles Kings", "Anaheim Ducks"],
@@ -379,10 +409,12 @@ const MARKETS = {
 
   "san-diego": {
     name: "San Diego",
+    rsns: [],
     home: { MLB: ["San Diego Padres"], MLS: ["San Diego FC"] },
     college: [{ name: "San Diego State Aztecs", tier: "secondary" }],
     regional: [{ name: "Los Angeles Chargers", sport: "NFL" }],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Los Angeles Chargers", issue: "Listed as regional NFL. A former SD team with mixed sentiment." },
       { team: "San Diego State Aztecs", issue: "Tier uncertain (could be flagship)." },
       { team: "San Diego FC", issue: "Exact ESPN displayName unverified." }
@@ -391,6 +423,7 @@ const MARKETS = {
 
   "bay-area": {
     name: "San Francisco Bay Area",
+    rsns: ["NBC Sports BA", "NBC Sports CA"],
     home: {
       NFL: ["San Francisco 49ers"],
       NHL: ["San Jose Sharks"],
@@ -412,6 +445,7 @@ const MARKETS = {
 
   "seattle": {
     name: "Seattle",
+    rsns: ["KONG"],
     home: {
       NFL: ["Seattle Seahawks"],
       NHL: ["Seattle Kraken"],
@@ -429,6 +463,7 @@ const MARKETS = {
 
   "portland": {
     name: "Portland",
+    rsns: ["KUNP 16"],
     home: { NBA: ["Portland Trail Blazers"], MLS: ["Portland Timbers"], WNBA: ["Portland Fire"] },
     college: [
       { name: "Oregon Ducks", tier: "flagship" },
@@ -447,6 +482,7 @@ const MARKETS = {
 
   "salt-lake-city": {
     name: "Salt Lake City",
+    rsns: ["KJZZ-TV", "Utah 16"],
     home: { NHL: ["Utah Mammoth"], NBA: ["Utah Jazz"], MLS: ["Real Salt Lake"] },
     college: [
       { name: "Utah Utes", tier: "flagship" },
@@ -461,6 +497,7 @@ const MARKETS = {
 
   "atlanta": {
     name: "Atlanta",
+    rsns: [],
     home: {
       NFL: ["Atlanta Falcons"],
       MLB: ["Atlanta Braves"],
@@ -473,11 +510,13 @@ const MARKETS = {
       { name: "Georgia Tech Yellow Jackets", tier: "secondary" }
     ],
     regional: [],
-    flags: []
+    flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },]
   },
 
   "miami": {
     name: "Miami",
+    rsns: [],
     home: {
       NFL: ["Miami Dolphins"],
       NHL: ["Florida Panthers"],
@@ -491,12 +530,14 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Miami Hurricanes / Florida Gators", issue: "Tiers uncertain." }
     ]
   },
 
   "tampa": {
     name: "Tampa Bay",
+    rsns: ["The Spot - MTN"],
     home: { NFL: ["Tampa Bay Buccaneers"], NHL: ["Tampa Bay Lightning"], MLB: ["Tampa Bay Rays"] },
     college: [
       { name: "Florida Gators", tier: "flagship" },
@@ -510,6 +551,7 @@ const MARKETS = {
 
   "jacksonville": {
     name: "Jacksonville",
+    rsns: [],
     home: { NFL: ["Jacksonville Jaguars"] },
     college: [
       { name: "Florida Gators", tier: "flagship" },
@@ -517,12 +559,14 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Florida Gators / Florida State Seminoles", issue: "Tiers uncertain." }
     ]
   },
 
   "charlotte": {
     name: "Charlotte",
+    rsns: ["CARNHL"],
     home: { NFL: ["Carolina Panthers"], NBA: ["Charlotte Hornets"], MLS: ["Charlotte FC"] },
     college: [{ name: "North Carolina Tar Heels", tier: "flagship" }],
     regional: [{ name: "Carolina Hurricanes", sport: "NHL" }],
@@ -534,6 +578,7 @@ const MARKETS = {
 
   "raleigh": {
     name: "Raleigh–Durham",
+    rsns: ["CARNHL"],
     home: { NHL: ["Carolina Hurricanes"] },
     college: [
       { name: "NC State Wolfpack", tier: "flagship" },
@@ -549,6 +594,7 @@ const MARKETS = {
 
   "nashville": {
     name: "Nashville",
+    rsns: [],
     home: { NFL: ["Tennessee Titans"], NHL: ["Nashville Predators"], MLS: ["Nashville SC"] },
     college: [
       { name: "Tennessee Volunteers", tier: "flagship" },
@@ -556,12 +602,14 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Tennessee Volunteers", issue: "Flagship uncertain (campus is in Knoxville)." }
     ]
   },
 
   "new-orleans": {
     name: "New Orleans",
+    rsns: ["GCSEN"],
     home: { NFL: ["New Orleans Saints"], NBA: ["New Orleans Pelicans"] },
     college: [
       { name: "LSU Tigers", tier: "flagship" },
@@ -573,6 +621,7 @@ const MARKETS = {
 
   "indianapolis": {
     name: "Indianapolis",
+    rsns: [],
     home: { NFL: ["Indianapolis Colts"], NBA: ["Indiana Pacers"], WNBA: ["Indiana Fever"] },
     college: [
       { name: "Indiana Hoosiers", tier: "flagship" },
@@ -581,6 +630,7 @@ const MARKETS = {
     ],
     regional: [],
     flags: [
+      { team: "(regional channels)", issue: "No RSN names seen in ESPN data for this market yet, so only national-channel games are available. Add rsns." },
       { team: "Indiana Hoosiers / Purdue Boilermakers", issue: "Unsure both are flagship. Notre Dame isn't listed." },
       { team: "Indiana Fever", issue: "WNBA base is 45. With Caitlin Clark the draw may be far higher. Consider adjust +10." }
     ]
@@ -588,6 +638,7 @@ const MARKETS = {
 
   "buffalo": {
     name: "Buffalo",
+    rsns: ["MSGB"],
     home: { NFL: ["Buffalo Bills"], NHL: ["Buffalo Sabres"] },
     college: [{ name: "Buffalo Bulls", tier: "secondary" }],
     regional: [],

@@ -135,6 +135,31 @@ function playoffRoundFromHeadline(headline) {
   return null;
 }
 
+// Broadcasts → { nationalChannels, regionalChannels: [{channel, side, team}], streaming }.
+// Prefers geoBroadcasts (typed: TV / Streaming / Radio); falls back to broadcasts.
+function parseBroadcasts(comp, homeName, awayName) {
+  const national = [], regional = [], streaming = [];
+  const teamFor = side => (side === "home" ? homeName : awayName);
+  const add = (rawName, marketType, kind) => {
+    if (!rawName) return;
+    const channel = canonicalChannel(rawName);
+    if (kind && kind !== "TV") { if (kind === "Streaming") streaming.push(channel); return; }
+    if (isStreamingName(channel)) { streaming.push(channel); return; }
+    const m = String(marketType || "").toLowerCase();
+    if (m === "home" || m === "away") {
+      if (!regional.some(r => r.channel === channel && r.side === m)) regional.push({ channel, side: m, team: teamFor(m) });
+    } else if (!national.includes(channel)) {
+      national.push(channel);
+    }
+  };
+  if (Array.isArray(comp.geoBroadcasts) && comp.geoBroadcasts.length) {
+    comp.geoBroadcasts.forEach(b => add(b.media && b.media.shortName, b.market && b.market.type, b.type && b.type.shortName));
+  } else {
+    (comp.broadcasts || []).forEach(b => (b.names || []).forEach(n => add(n, b.market, null)));
+  }
+  return { nationalChannels: national, regionalChannels: regional, streaming };
+}
+
 // Returns { game, warnings }. Throws NormalizationError with a reason when a
 // required field is missing, so the caller can report it instead of guessing.
 function normalizeEspnEvent(event, sport) {
@@ -185,6 +210,7 @@ function normalizeEspnEvent(event, sport) {
     if (!playoffRound) warnings.push(`postseason round unknown ("${headline || "no headline"}"), multiplier 1.0`);
   }
 
+  const tv = parseBroadcasts(comp, homeName, awayName);
   const prob = comp.situation && comp.situation.lastPlay && comp.situation.lastPlay.probability;
   const winProbability = prob && typeof prob.homeWinPercentage === "number" ? prob.homeWinPercentage : null;
 
@@ -216,7 +242,15 @@ function normalizeEspnEvent(event, sport) {
       gameNumber: null,
       totalGames: null,
       winProbability,
-      scheduledStartTime: event.date || null
+      scheduledStartTime: event.date || null,
+      // Channels. `channel` = first listed national TV channel; `regionalChannel` = first
+      // local channel with the team whose market it serves. Availability per market
+      // is decided later (modules/eligibility.js).
+      nationalChannels: tv.nationalChannels,
+      regionalChannels: tv.regionalChannels,
+      streamingChannels: tv.streaming,
+      channel: tv.nationalChannels[0] || null,
+      regionalChannel: tv.regionalChannels[0] || null
     }
   };
 }
@@ -331,6 +365,8 @@ function generateMockGames(scenario = "tuesday") {
       id: "espn_401465001",
       sport: "NHL",
       homeTeam: "Washington Capitals",
+      nationalChannels: [],
+      regionalChannels: [{ channel: "Monumental Sports Network", side: "home", team: "Washington Capitals" }],
       awayTeam: "Pittsburgh Penguins",
       homeTeamRank: null,
       awayTeamRank: null,
@@ -352,6 +388,8 @@ function generateMockGames(scenario = "tuesday") {
       id: "espn_401465002",
       sport: "NFL",
       homeTeam: "Washington Commanders",
+      nationalChannels: ["ESPN"],
+      regionalChannels: [],
       awayTeam: "Dallas Cowboys",
       homeTeamRank: null,
       awayTeamRank: null,
@@ -373,6 +411,8 @@ function generateMockGames(scenario = "tuesday") {
       id: "espn_401465003",
       sport: "MLB",
       homeTeam: "Boston Red Sox",
+      nationalChannels: ["MLB Network"],
+      regionalChannels: [{ channel: "NESN", side: "home", team: "Boston Red Sox" }],
       awayTeam: "New York Yankees",
       homeTeamRank: null,
       awayTeamRank: null,
@@ -395,6 +435,8 @@ function generateMockGames(scenario = "tuesday") {
       id: "espn_401465004",
       sport: "NBA",
       homeTeam: "Boston Celtics",
+      nationalChannels: ["NBA TV"],
+      regionalChannels: [],
       awayTeam: "Miami Heat",
       homeTeamRank: null,
       awayTeamRank: null,
@@ -416,6 +458,8 @@ function generateMockGames(scenario = "tuesday") {
       id: "espn_401465005",
       sport: "CFB",
       homeTeam: "Ohio State Buckeyes",
+      nationalChannels: ["FOX"],
+      regionalChannels: [],
       awayTeam: "Michigan State Spartans",
       homeShort: "Ohio State",
       awayShort: "Michigan St",
@@ -441,6 +485,8 @@ function generateMockGames(scenario = "tuesday") {
       id: "espn_401465006",
       sport: "CBB",
       homeTeam: "Georgetown Hoyas",
+      nationalChannels: ["FS1"],
+      regionalChannels: [],
       awayTeam: "Villanova Wildcats",
       homeShort: "Georgetown",
       awayShort: "Villanova",
@@ -478,6 +524,7 @@ function generateMockGames(scenario = "tuesday") {
     });
   }
 
+  games = games.map(g => ({ ...g, channel: g.nationalChannels[0] || null, regionalChannel: g.regionalChannels[0] || null }));
   return {
     games,
     errors: [],

@@ -1,12 +1,16 @@
 // Eligibility + watchability (Phase 5). Runs BEFORE scoring.
 //
+// Availability runs first (Phase 6): a game a bar can't tune to is tier
+// "unavailable" and never reaches the tiers below.
+//
 // Tiers:
 //   eligible — every NFL/NBA/NHL/MLB game; any game with a team in the market's
 //              team table; any game with a ranked (top-25) college team; any game
 //              with a national program.
 //   filler   — unranked college games where BOTH teams are Power-conference
 //              (ACC, Big Ten, Big 12, SEC; + Big East in men's basketball;
-//              Notre Dame counts as Power). Used only when nothing eligible is watchable.
+//              Notre Dame counts as Power). Fills TVs after eligible games reach
+//              their share caps (Phase 6 fill order).
 //   excluded — everything else. Never scored, never on the default screen.
 
 const PRO_SPORTS = new Set(["NFL", "NBA", "NHL", "MLB"]);
@@ -30,8 +34,31 @@ function isPowerTeam(sport, teamName, conferenceId) {
   return !!(confs && conferenceId != null && confs[String(conferenceId)]);
 }
 
-// → { tier: "eligible" | "filler" | "excluded", tierReason }
+// → { available, channel, channelSource: "national" | "regional", reason }
+function availabilityOf(game, venue) {
+  const national = (game.nationalChannels || []).find(c => NATIONAL_CHANNEL_SET.has(c));
+  if (national) return { available: true, channel: national, channelSource: "national" };
+  const rsns = (venue.market && venue.market.rsns) || [];
+  const local = (game.regionalChannels || []).find(r => rsns.includes(r.channel));
+  if (local) return { available: true, channel: local.channel, channelSource: "regional" };
+
+  const on = [
+    ...(game.nationalChannels || []).map(c => `${c} (not on the national list)`),
+    ...(game.regionalChannels || []).map(r => `${r.channel} (${r.team} local)`),
+    ...(game.streamingChannels || []).map(c => `${c} (streaming)`)
+  ];
+  return { available: false, channel: null, channelSource: null, reason: on.length ? `on ${on.join(", ")}` : "no TV listed" };
+}
+
+// → { tier: "unavailable" | "eligible" | "filler" | "excluded", tierReason, displayChannel, channelSource }
 function classifyGame(game, venue) {
+  const a = availabilityOf(game, venue);
+  if (!a.available) return { tier: "unavailable", tierReason: `not available in market: ${a.reason}`, displayChannel: null, channelSource: null };
+  const t = classifyTier(game, venue);
+  return { ...t, displayChannel: a.channel, channelSource: a.channelSource };
+}
+
+function classifyTier(game, venue) {
   if (PRO_SPORTS.has(game.sport)) return { tier: "eligible", tierReason: `${game.sport} game` };
 
   const table = venue.teamTable || {};

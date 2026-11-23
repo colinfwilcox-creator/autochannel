@@ -38,7 +38,7 @@ check(run(`__lock.primary && __lock.primary.game.homeTeam === "Washington Comman
 // Force the Commanders ChannelScore to 10 after scoring: lock, saturation and state must not change.
 run(`
   var __low = scoreGames(__games, __bd).map(g => g.homeTeam === "Washington Commanders" ? { ...g, channelScore: 10 } : g);
-  var __ba = createTVAssignments(__low, __lock, __bd);
+  var __ba = programTVs(__low, [], __lock, __bd, createAnchorHistory(), new Date(), []);
   var __cmd = __ba.allGames.find(g => g.homeTeam === "Washington Commanders");
 `);
 console.log(`  forced Commanders ChannelScore = ${run("__cmd.channelScore")}, state = ${run("__cmd.anchorState")}`);
@@ -99,86 +99,80 @@ check(two.lock === "Washington Commanders" && two.cmd.total === 10, "first lockL
 check(two.caps.secondaries >= 1, "Capitals guaranteed ≥1 secondary");
 
 // ---------- A4: diehard with nothing demoted ----------
-h("A4  Diehard screen with nothing demoted fills by ChannelScore");
+h("A4  Diehard screen with nothing demoted is an ordinary TV");
 const dh = run(`(() => {
-  const a = runAssignmentCycle(generateMockGames("tuesday").games, __bd);
+  const a = runAssignmentCycle(generateMockGames("tuesday").games, __bd, createAnchorHistory(), new Date(), { programming: [] });
   const g = a.secondaries[__bd.diehardId];
-  const independent = __bd.secondaries.filter(tv => !a.saturationMap[tv.id]).map(tv => a.secondaries[tv.id]);
-  return { game: g && g.homeTeam, score: g && g.channelScore, demoted: a.allGames.filter(x => x.anchorState === "demoted").length,
-           top: Math.max(...independent.filter(Boolean).map(x => x.channelScore)) };
+  return { game: g && g.homeTeam, demoted: a.allGames.filter(x => x.anchorState === "demoted").length, sat: a.saturationMap[__bd.diehardId] };
 })()`);
-console.log(`  diehard (${run("__bd.diehardId")}) shows ${dh.game} (${dh.score.toFixed(1)}); demoted games: ${dh.demoted}`);
-check(dh.demoted === 0 && dh.score === dh.top, "diehard holds the best non-saturated game");
+console.log(`  diehard (${run("__bd.diehardId")}) shows ${dh.game}; demoted games: ${dh.demoted}`);
+check(dh.demoted === 0 && !!dh.game && !dh.sat, "diehard is filled like any other TV and is never saturated");
 
 h("A4b Demoted game routing (needs anchor history, one-way)");
-// Cycle 1: competitive Celtics hold an anchor. Cycle 2: Celtics blowout → Demoted.
+// Cycle 1: competitive Celtics are the #1 item, so they hold the Main TVs. Cycle 2: blowout → Demoted.
 run(`
-  var __base = generateMockGames("dc-playoff").games.map(g => ({ ...g, isPlayoff: false })); // no lock
+  var __base = generateMockGames("dc-playoff").games
+    .filter(g => ["Boston Celtics", "Georgetown Hoyas"].includes(g.homeTeam)).map(g => ({ ...g, isPlayoff: false }));
   var __blowCeltics = gs => gs.map(g => g.homeTeam === "Boston Celtics"
     ? { ...g, homeScore: 98, awayScore: 60, gamePhase: 0.8, winProbability: 0.99 } : g);
+  var __noGrid = { programming: [] };
 `);
 const dem16 = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 16, anchorTVs: [1,2,3,4] });
   const hist = createAnchorHistory();
-  const a1 = runAssignmentCycle(__base, v, hist);
+  const a1 = runAssignmentCycle(__base, v, hist, new Date(), __noGrid);
   const anchoredFirst = Object.values(a1.anchors).some(g => g && g.homeTeam === "Boston Celtics");
-  const a2 = runAssignmentCycle(__blowCeltics(__base), v, hist);
+  const a2 = runAssignmentCycle(__blowCeltics(__base), v, hist, new Date(), __noGrid);
   const c2 = a2.allGames.find(g => g.homeTeam === "Boston Celtics");
-  const a3 = runAssignmentCycle(__base, v, hist); // tightens up again
+  const a3 = runAssignmentCycle(__base, v, hist, new Date(), __noGrid); // tightens up again
   const c3 = a3.allGames.find(g => g.homeTeam === "Boston Celtics");
   return { anchoredFirst, state2: c2.anchorState, cs2: c2.channelScore, diehard2: a2.secondaries[v.diehardId]?.homeTeam,
            onAnchor2: Object.values(a2.anchors).some(g => g && g.homeTeam === "Boston Celtics"),
            state3: c3.anchorState, onAnchor3: Object.values(a3.anchors).some(g => g && g.homeTeam === "Boston Celtics") };
 })()`);
-console.log(`  cycle 1 anchored: ${dem16.anchoredFirst}; cycle 2 CS ${dem16.cs2.toFixed(1)} → ${dem16.state2}, diehard: ${dem16.diehard2}; cycle 3 (close again) → ${dem16.state3}`);
+console.log(`  cycle 1 on Main: ${dem16.anchoredFirst}; cycle 2 CS ${dem16.cs2.toFixed(1)} → ${dem16.state2}, diehard: ${dem16.diehard2}; cycle 3 (close again) → ${dem16.state3}`);
 check(dem16.anchoredFirst && dem16.state2 === "demoted" && !dem16.onAnchor2 && dem16.diehard2 === "Boston Celtics",
-  "S ≥ 4: anchored game that blows out is Demoted and moves to the diehard screen");
-check(dem16.state3 === "demoted" && !dem16.onAnchor3, "demotion is one-way: no return to an anchor when it tightens up");
+  "S ≥ 4: a Main-TV game that blows out is Demoted and moves to the diehard screen");
+check(dem16.state3 === "demoted" && !dem16.onAnchor3, "demotion is one-way: no return to a Main TV when it tightens up");
 const fresh = run(`(() => {
-  const a = runAssignmentCycle(__blowCeltics(__base), buildVenue({ marketId: "washington-dc", totalTVs: 16, anchorTVs: [1,2,3,4] }));
+  const a = runAssignmentCycle(__blowCeltics(__base), buildVenue({ marketId: "washington-dc", totalTVs: 16, anchorTVs: [1,2,3,4] }), createAnchorHistory(), new Date(), __noGrid);
   return a.allGames.find(g => g.homeTeam === "Boston Celtics").anchorState;
 })()`);
-check(fresh !== "demoted", `a sub-35 game that never held an anchor is not Demoted (got ${fresh})`);
+check(fresh !== "demoted", `a sub-35 game that never held a Main TV is not Demoted (got ${fresh})`);
 const dem4 = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 4, anchorTVs: [1, 2] });
-  const only = gs => gs.filter(g => !["Washington Capitals", "Boston Red Sox"].includes(g.homeTeam));
   const hist = createAnchorHistory();
-  const a1 = runAssignmentCycle(only(__base), v, hist);
+  const a1 = runAssignmentCycle(__base, v, hist, new Date(), __noGrid);
   const anchoredFirst = Object.values(a1.anchors).some(g => g && g.homeTeam === "Boston Celtics");
-  const a = runAssignmentCycle(only(__blowCeltics(__base)), v, hist);
+  const a = runAssignmentCycle(__blowCeltics(__base), v, hist, new Date(), __noGrid);
   const onAnchor = Object.values(a.anchors).some(g => g && g.homeTeam === "Boston Celtics");
   const onSec = Object.values(a.secondaries).some(g => g && g.homeTeam === "Boston Celtics");
   return { anchoredFirst, onAnchor, onSec };
 })()`);
-check(dem4.anchoredFirst && !dem4.onAnchor && dem4.onSec, "S < 4: demoted game takes the lowest-scoring secondary, never an anchor");
+check(dem4.anchoredFirst && !dem4.onAnchor && dem4.onSec, "S < 4: demoted game takes a secondary, never a Main TV");
 
 // ---------- A5: MLB display ----------
 h("A5  MLB display");
 const mlb = run(`formatGameClock(generateMockGames().games.find(g => g.sport === "MLB"))`);
 check(mlb === "Top 7th", `MLB card shows "${mlb}"`);
 
-// ---------- C: anchor rules ----------
-h("C   Anchor rules (non-lock)");
-run(`var __noLock = generateMockGames("dc-playoff").games.map(g => ({ ...g, isPlayoff: false }));`);
-for (const [N, A] of [[6, 1], [8, 2], [13, 3], [16, 4]]) {
-  const r = run(`(() => {
-    const v = buildVenue({ marketId: "washington-dc", totalTVs: ${N}, anchorTVs: ${JSON.stringify(Array.from({ length: A }, (_, i) => i + 1))} });
-    const a = runAssignmentCycle(__noLock, v);
-    return { mode: a.anchorMode, anchors: v.anchors.map(tv => a.anchors[tv.id]?.homeTeam || "—") };
-  })()`);
-  console.log(`  A=${A}: ${r.mode.padEnd(14)} ${r.anchors.join(" | ")}`);
+// ---------- C: Main TVs (Phase 7 replaces the 1-1-1 / 2-1 / NFL-flip anchor rules) ----------
+h("C   Main TVs show the #1 item; distinct-content target");
+for (const [n, k] of [[1, 1], [3, 1], [4, 2], [7, 3], [9, 3], [13, 5], [15, 5], [20, 5]]) {
+  check(run(`distinctTarget(${n})`) === k, `${n} TVs → about ${k} different things on screen`);
 }
-const split = run(`(() => {
-  const games = [
-    { id: "x1", sport: "NBA", channelScore: 90 }, { id: "x2", sport: "NFL", channelScore: 60 },
-    { id: "x3", sport: "NHL", channelScore: 55 }, { id: "x4", sport: "MLB", channelScore: 50 }
-  ];
-  const v = buildVenue({ marketId: "washington-dc", totalTVs: 16, anchorTVs: [1,2,3,4] });
-  const r = assignAnchors(games, v);
-  return { mode: r.mode, ids: v.anchors.map(tv => r.assignments[tv.id].id) };
-})()`);
-console.log(`  A=4 synthetic NBA 90 / NFL 60 / NHL 55: ${split.mode} → ${split.ids.join(" | ")}`);
-check(split.ids.join() === "x2,x1,x3,x2", "2-1 at A=4 with NFL flip: NFL on anchors 1 and 4, #1 and #3 interior");
+run(`var __noLock = generateMockGames("dc-playoff").games.map(g => ({ ...g, isPlayoff: false }));`);
+for (const N of [6, 8, 13, 16]) {
+  const r = run(`(() => {
+    const v = buildVenue({ marketId: "washington-dc", totalTVs: ${N} });
+    const a = runAssignmentCycle(__noLock, v, createAnchorHistory(), new Date(), { programming: [] });
+    const top = [...a.allGames].sort((x, y) => y.channelScore - x.channelScore)[0];
+    const distinct = new Set(v.tvs.map(tv => (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id]?.id).filter(Boolean)).size;
+    return { A: v.anchors.length, main: v.anchors.map(tv => a.anchors[tv.id]?.homeTeam), top: top.homeTeam, distinct, target: distinctTarget(${N}) };
+  })()`);
+  check(r.main.every(t => t === r.top) && r.distinct <= r.target,
+    `${N} TVs: all ${r.A} Main TV(s) show #1 (${r.top}); ${r.distinct} distinct game(s), target ${r.target}`);
+}
 
 // ---------- D3: other markets ----------
 function showMarket(id) {
@@ -314,65 +308,76 @@ h("P6.3 Share caps");
 const caps = [[60, 15, 10], [55, 15, 10], [54.9, 15, 6], [35, 15, 6], [34.9, 15, 1], [60, 5, 3], [40, 5, 2], [60, 2, 1], [60, 1, 1], [40, 1, 1]];
 for (const [cs, n, want] of caps) check(run(`shareCap({ channelScore: ${cs} }, ${n})`) === want, `ChannelScore ${cs}, ${n} TVs → at most ${want}`);
 
-h("P6.4 Fill order: lock → eligible (caps) → filler (caps) → programming → always-available");
+h("P7.1 Programming the TVs");
 run(`var __at = iso => new Date(iso);
   var __mon430 = __at("2026-11-23T21:30:00Z");   // Mon 4:30 PM ET
   var __layout = (a, v) => v.tvs.map(tv => { const g = (tv.role === "anchor" ? a.anchors : a.secondaries)[tv.id];
-    return g ? { kind: "game", id: g.id, channel: g.displayChannel } : a.programming[tv.id] ? { kind: "prog", channel: a.programming[tv.id].channel, src: a.programming[tv.id].source } : { kind: "none" }; });`);
+    return g ? { kind: "game", id: g.id, channel: g.displayChannel } : a.programming[tv.id] ? { kind: "prog", channel: a.programming[tv.id].channel, show: a.programming[tv.id].show, src: a.programming[tv.id].source } : { kind: "none" }; });`);
+check(JSON.stringify(run(`proportionalSplit(7, [70, 45, 20], [2, 1, 1], [99, 99, 99])`)) === "[3,2,2]" ||
+      JSON.stringify(run(`proportionalSplit(7, [70, 45, 20], [2, 1, 1], [99, 99, 99])`)) === "[4,2,1]",
+  `proportional split of 7 TVs by 70/45/20 → ${JSON.stringify(run(`proportionalSplit(7, [70, 45, 20], [2, 1, 1], [99, 99, 99])`))}`);
+check(JSON.stringify(run(`proportionalSplit(10, [60, 30, 10], [1, 1, 1], [99, 99, 99])`)) === "[6,3,1]", "split 10 by 60/30/10 → 6/3/1");
+check(JSON.stringify(run(`proportionalSplit(10, [60, 30, 10], [1, 1, 1], [4, 99, 99])`)) === "[4,5,1]", "a cap moves the excess to the others: 4/5/1");
+
 const mix = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 12 });
   const games = [
     __g({ id: "a", sport: "NBA", homeTeam: "Boston Celtics", awayTeam: "Miami Heat", nationalChannels: ["ESPN"] }),
     __g({ id: "b", sport: "NHL", homeTeam: "Dallas Stars", awayTeam: "Seattle Kraken", nationalChannels: ["TNT"], winProbability: 0.9 }),
-    __g({ id: "f", homeTeam: "Ole Miss Rebels", awayTeam: "Providence Friars", homeConferenceId: "23", awayConferenceId: "4", nationalChannels: ["SEC Network"],
-      homeScore: 80, awayScore: 50, gamePhase: 0.9, winProbability: 0.99 }),
     __g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals", nationalChannels: ["ESPN2"] }),
     __g({ id: "u", sport: "NHL", homeTeam: "Calgary Flames", awayTeam: "Ottawa Senators", nationalChannels: [], streamingChannels: ["ESPN+"] })];
-  const a = runAssignmentCycle(games, v, createAnchorHistory(), __mon430);
-  const cs = Object.fromEntries(a.catalog.filter(g => typeof g.channelScore === "number").map(g => [g.id, g.channelScore]));
-  return { layout: __layout(a, v), cs, tiers: Object.fromEntries(a.catalog.map(g => [g.id, g.tier])) };
+  const grid = [{ channel: "FS1", show: "The Facility", priority: 45 }, { channel: "ESPN", show: "NFL Live", priority: 70 },
+                { channel: "NFL Network", show: "Show N", priority: 30 }, { channel: "MLB Network", show: "Show M", priority: 20 }];
+  const a = runAssignmentCycle(games, v, createAnchorHistory(), __mon430, { programming: grid });
+  const cs = Object.fromEntries(a.allGames.map(g => [g.id, g.channelScore]));
+  return { layout: __layout(a, v), cs, tiers: Object.fromEntries(a.catalog.map(g => [g.id, g.tier])), target: a.distinctTarget, items: a.items.map(i => i.channel + ":" + (i.show || i.id) + ":" + i.strength.toFixed(1)) };
 })()`);
 const cnt = id => mix.layout.filter(l => l.kind === "game" && l.id === id).length;
-const capOf = id => run(`shareCap({ channelScore: ${mix.cs[id]} }, 12)`);
-console.log(`  12 TVs: ${mix.layout.map(l => l.kind === "game" ? l.id : l.kind === "prog" ? "[" + l.channel + "]" : "-").join(" ")}`);
-console.log(`  ChannelScores: a ${mix.cs.a.toFixed(1)} (cap ${capOf("a")}), b ${mix.cs.b.toFixed(1)} (cap ${capOf("b")}), f ${mix.cs.f.toFixed(1)} (cap ${capOf("f")})`);
-check(cnt("a") === capOf("a") && cnt("b") === capOf("b"), "each eligible game fills up to its share cap");
-check(cnt("f") === Math.min(capOf("f"), 12 - cnt("a") - cnt("b")) && cnt("f") >= 1, "filler fills after eligible games hit their caps, within its own cap");
+const things = new Set(mix.layout.map(l => l.kind === "game" ? "g:" + l.id : l.kind === "prog" ? "p:" + l.channel + l.show : "none"));
+console.log(`  12 TVs: ${mix.layout.map(l => l.kind === "game" ? l.id + "@" + l.channel : l.kind === "prog" ? "[" + l.channel + " · " + l.show + "]" : "-").join(" ")}`);
+console.log(`  items picked: ${mix.items.join(" | ")}`);
+check(things.size <= mix.target && things.size >= mix.target - 1, `${things.size} different things on 12 TVs (target ${mix.target})`);
+check(!mix.layout.some(l => l.kind === "prog" && l.channel === "ESPN"), "ESPN carries a game, so its grid entry (NFL Live) is not shown");
+check(cnt("a") <= run(`shareCap({ channelScore: ${mix.cs.a} }, 12)`) && cnt("b") <= run(`shareCap({ channelScore: ${mix.cs.b} }, 12)`), "share caps still limit games");
 check(cnt("x") === 0 && cnt("u") === 0 && mix.tiers.u === "unavailable" && mix.tiers.x === "excluded", "excluded and unavailable games never go on a TV");
 const progCh = mix.layout.filter(l => l.kind === "prog").map(l => l.channel);
-const gameCh = new Set(mix.layout.filter(l => l.kind === "game").map(l => l.channel));
-check(new Set(progCh).size === progCh.length, `no two programmed TVs share a channel (${progCh.join(", ")})`);
-check(progCh.every(c => !gameCh.has(c)), "programming never reuses a channel that carries a game on another TV");
-const firstProg = mix.layout.findIndex(l => l.kind === "prog"), lastGame = mix.layout.map(l => l.kind).lastIndexOf("game");
-check(firstProg > lastGame, "programming only on TVs left after games");
+check(progCh.length > new Set(progCh).size, `programmed channels can repeat (${progCh.join(", ")})`);
+check(mix.layout.every(l => l.kind !== "prog" || !!l.show), "every programmed TV has known content (a show), never a bare channel");
 
 const lone = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 5 });
   const g = __g({ id: "c", homeTeam: "Clemson Tigers", awayTeam: "Ole Miss Rebels", homeScore: 51, awayScore: 75, gamePhase: 0.9, winProbability: 0.99, nationalChannels: ["ACC Network"] });
-  const a = runAssignmentCycle([g], v, createAnchorHistory(), __mon430);
+  const a = runAssignmentCycle([g], v, createAnchorHistory(), __mon430, { programming: [{ channel: "ESPN", show: "NFL Live", priority: 70 }] });
   return { layout: __layout(a, v), cs: a.allGames[0].channelScore };
 })()`);
-console.log(`  lone blowout (CS ${lone.cs.toFixed(1)}), 5 TVs, Mon 4:30 PM: ${lone.layout.map(l => l.kind === "game" ? l.id + "@" + l.channel : "[" + l.channel + "]").join(" ")}`);
+console.log(`  lone blowout (CS ${lone.cs.toFixed(1)}) + NFL Live, 5 TVs: ${lone.layout.map(l => l.kind === "game" ? l.id + "@" + l.channel : l.kind === "prog" ? "[" + l.channel + "]" : "-").join(" ")}`);
 check(lone.layout.filter(l => l.kind === "game").length === 1, "a ChannelScore < 35 game gets exactly 1 TV");
-check(lone.layout.filter(l => l.kind === "prog").length === 4, "the other 4 TVs get programming");
+check(lone.layout[0].kind === "prog" && lone.layout[0].channel === "ESPN", "the stronger item (NFL Live, priority 70) is #1 and takes the Main TV");
 
 const lockRun = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 15 });
-  const a = runAssignmentCycle(generateMockGames("tuesday").games, v, createAnchorHistory());
+  const a = runAssignmentCycle(generateMockGames("tuesday").games, v, createAnchorHistory(), new Date(), { programming: [] });
   return { lock: a.lockGame && a.lockGame.homeTeam, tvs: countTVsForGame(a, a.lockGame.id), sat: a.saturationTarget, A: v.anchors.length };
 })()`);
 check(lockRun.lock === "Washington Commanders" && lockRun.tvs.anchors === lockRun.A && lockRun.tvs.secondaries === lockRun.sat,
-  `lock unchanged by caps: Commanders on ${lockRun.A} main + ${lockRun.sat} saturated = ${lockRun.tvs.total} of 15 TVs`);
+  `lock unchanged: Commanders on ${lockRun.A} main + ${lockRun.sat} saturated = ${lockRun.tvs.total} of 15 TVs`);
 
 const none = run(`(() => {
-  const v = buildVenue({ marketId: "washington-dc", totalTVs: 20 });
-  const a = runAssignmentCycle([__g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })], v, createAnchorHistory(), __mon430);
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 7 });
+  const a = runAssignmentCycle([__g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })], v, createAnchorHistory(), __mon430, { programming: [] });
   const progs = Object.values(a.programming);
-  return { pool: a.poolTier, chans: progs.filter(Boolean).map(p => p.channel), empty: progs.filter(p => !p).length,
-           srcs: [...new Set(progs.filter(Boolean).map(p => p.source))] };
+  return { chans: progs.filter(Boolean).map(p => p.channel), srcs: [...new Set(progs.filter(Boolean).map(p => p.source))] };
 })()`);
-check(none.pool === "none" && new Set(none.chans).size === none.chans.length, `nothing watchable → 20 TVs: ${none.chans.length} distinct channels, ${none.empty} left to the venue`);
-check(none.srcs.includes("grid") && none.srcs.includes("always"), "grid entries first, then the always-available list");
+check(none.chans.length === 7 && none.srcs.join() === "always" && new Set(none.chans).size === run("distinctTarget(7)"),
+  `nothing known to be on → always-available list (${[...new Set(none.chans)].join(", ")})`);
+const capped = run(`(() => {
+  const v = buildVenue({ marketId: "washington-dc", totalTVs: 7 });
+  const g = __g({ id: "c", homeTeam: "Clemson Tigers", awayTeam: "Ole Miss Rebels", homeScore: 51, awayScore: 75, gamePhase: 0.9, winProbability: 0.99, nationalChannels: ["ACC Network"] });
+  const a = runAssignmentCycle([g], v, createAnchorHistory(), __mon430, { programming: [] });
+  return Object.values(a.programming);
+})()`);
+check(capped.filter(p => p === null).length === 6 && !capped.some(p => p && p.source === "always"),
+  "a known game at its cap: the rest is left to the venue, never filled with unknown channels");
 
 h("P6.5 Programming grid");
 const gridBad = run(`PROGRAMMING_GRID.filter(e => !e.channel || !e.show || !e.days.length || e.days.some(d => !ALL_DAYS.includes(d))

@@ -65,19 +65,11 @@ const PROGRAMMING_GRID = [
 
   // ---- Golf Channel ----
   { channel: "Golf Channel", show: "Golf Today", days: WEEKDAYS, start: "12:00", end: "14:00", priority: 35, verify: true },
-  { channel: "Golf Channel", show: "Golf Central", days: ALL_DAYS, start: "18:00", end: "19:00", priority: 40, verify: true },
-
-  // ---- Network blocks: low priority, so big venues still have distinct channels ----
-  { channel: "ESPN2", show: "ESPN2", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 20, verify: true },
-  { channel: "CBS Sports Network", show: "CBS Sports Network", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 18, verify: true },
-  { channel: "Big Ten Network", show: "Big Ten Network", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 18, verify: true },
-  { channel: "SEC Network", show: "SEC Network", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 18, verify: true },
-  { channel: "ACC Network", show: "ACC Network", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 18, verify: true },
-  { channel: "ESPNU", show: "ESPNU", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 12, verify: true },
-  { channel: "Tennis Channel", show: "Tennis Channel", days: ALL_DAYS, start: "06:00", end: "24:00", priority: 10, verify: true }
+  { channel: "Golf Channel", show: "Golf Central", days: ALL_DAYS, start: "18:00", end: "19:00", priority: 40, verify: true }
 ];
 
-// Last resort, in this order, when no grid entry is airing on an unused channel.
+// Last resort, only when nothing at all (no game, no grid entry) is known to be on.
+// Phase 7: bare channel names with unknown content are otherwise never shown.
 const ALWAYS_AVAILABLE_CHANNELS = ["NFL Network", "MLB Network", "NHL Network", "NBA TV", "Golf Channel", "ESPN News"];
 
 // ---------- Grid evaluation ----------

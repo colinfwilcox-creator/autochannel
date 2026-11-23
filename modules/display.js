@@ -93,200 +93,198 @@ function shareCap(game, totalTVs) {
   return 1;
 }
 
-// ---------- 3. Assignment ----------
+// ---------- 3. Programming the TVs (Phase 7) ----------
+//
+// Items are things a TV can show that we know are on: a game, or a programming
+// grid entry airing now. Strength = ChannelScore for games, grid priority for shows.
+//
+//   1. Lock game: all Main TVs + saturation (unchanged). Other lock games: 1 TV each.
+//      A demoted game takes the diehard TV (or the last free one), never a Main TV.
+//   2. Distinct-content target K = min(5, ceil(N / 3)) things on screen.
+//   3. Pick the top items by strength (eligible games + grid shows; filler games
+//      only if that's not enough). Without a lock, Main TVs show the #1 item.
+//   4. Share the remaining TVs across the picked items in proportion to strength
+//      (largest remainder, each item ≥ 1). Share caps limit games.
+//   5. Channels with unknown content are never shown, except the always-available
+//      list when nothing at all is known to be on.
 
-function assignAnchors(candidates, venue) {
-  const anchors = venue.anchors;
-  const A = anchors.length;
-  const out = {};
-  anchors.forEach(tv => { out[tv.id] = null; });
-  if (!candidates.length) return { assignments: out, mode: "empty" };
+const MAX_DISTINCT_ITEMS = 5;
 
-  if (A === 1) {
-    out[anchors[0].id] = candidates[0];
-    return { assignments: out, mode: "single" };
-  }
-
-  if (A === 2) { // 2-1 split disabled
-    anchors.forEach((tv, i) => { out[tv.id] = candidates[i] || null; });
-    return { assignments: out, mode: "1-1" };
-  }
-
-  // A ≥ 3
-  const gap = candidates.length >= 2 ? candidates[0].channelScore - candidates[1].channelScore : 0;
-  if (candidates.length >= 2 && gap >= venue.thresholds.dominanceGap) {
-    let featured = candidates[0];
-    let rest = candidates.slice(1);
-    let mode = "2-1";
-    // NFL flip: non-NFL #1 over NFL #2 → NFL takes the outer anchors.
-    if (featured.sport !== "NFL" && candidates[1].sport === "NFL") {
-      featured = candidates[1];
-      rest = [candidates[0], ...candidates.slice(2)];
-      mode = "2-1 (NFL flip)";
-    }
-    // The featured game takes two anchors, so its share cap must allow 2 TVs.
-    if (shareCap(featured, venue.tvs.length) < 2) {
-      anchors.forEach((tv, i) => { out[tv.id] = candidates[i] || null; });
-      return { assignments: out, mode: anchors.map(() => "1").join("-") + " (2-1 capped)" };
-    }
-    out[anchors[0].id] = featured;
-    out[anchors[A - 1].id] = featured;
-    for (let i = 1; i <= A - 2; i++) out[anchors[i].id] = rest[i - 1] || null;
-    return { assignments: out, mode };
-  }
-
-  anchors.forEach((tv, i) => { out[tv.id] = candidates[i] || null; });
-  return { assignments: out, mode: anchors.map(() => "1").join("-") };
-}
-
-function createTVAssignments(scoredGames, lockResult, venue, history = createAnchorHistory()) {
-  const lockedIds = new Set();
-  if (lockResult.primary) lockedIds.add(lockResult.primary.game.id);
-  lockResult.others.forEach(m => lockedIds.add(m.game.id));
-
-  const games = scoredGames.map(g => ({ ...g, anchorState: getAnchorState(g, venue, lockedIds, history) }));
-  games.filter(g => g.anchorState === "demoted").forEach(g => history.demoted.add(g.id));
-  const byId = Object.fromEntries(games.map(g => [g.id, g]));
-  const byScore = [...games]
-    .filter(g => !INACTIVE_STATUSES.has(g.gameStatus))
-    .sort((a, b) => b.channelScore - a.channelScore);
-
-  const primary = lockResult.primary ? byId[lockResult.primary.game.id] : null;
-  const primaryItem = lockResult.primary ? lockResult.primary.item : null;
-  const otherLocks = lockResult.others.map(m => byId[m.game.id]).filter(Boolean);
-
-  // --- Anchors ---
-  let anchorResult;
-  if (primary) {
-    const out = {};
-    venue.anchors.forEach(tv => { out[tv.id] = primary; });
-    anchorResult = { assignments: out, mode: "lock" };
-  } else {
-    const candidates = byScore.filter(g => g.anchorState !== "demoted"); // demoted never on an anchor
-    anchorResult = assignAnchors(candidates, venue);
-  }
-  const onAnchor = new Set(Object.values(anchorResult.assignments).filter(Boolean).map(g => g.id));
-  // Record games that hold an anchor while Active, so a later blowout can demote them.
-  Object.values(anchorResult.assignments).forEach(g => {
-    if (g && !lockedIds.has(g.id) && g.channelScore >= venue.thresholds.blowoutDemotion) history.anchored.add(g.id);
-  });
-
-  // --- Secondaries ---
-  const secs = venue.secondaries;
-  const S = secs.length;
-  const sec = {};
-  const saturationMap = {};
-  const guaranteedMap = {};
-  secs.forEach(tv => { sec[tv.id] = null; saturationMap[tv.id] = false; guaranteedMap[tv.id] = false; });
-
-  let saturationTarget = 0;
-  if (primary) {
-    const eligible = secs.filter(tv => tv.saturationEligible);
-    saturationTarget = computeSaturationCount(S, eligible.length, primaryItem.saturation);
-    eligible.slice(0, saturationTarget).forEach(tv => { sec[tv.id] = primary; saturationMap[tv.id] = true; });
-  }
-
-  const placed = new Set(onAnchor);
-  const freeSecs = () => secs.filter(tv => sec[tv.id] === null);
-  const diehardTV = venue.diehardId ? secs.find(tv => tv.id === venue.diehardId) : null;
-
-  // (a) Other live lock games: guaranteed ≥1 secondary (§17.A.3).
-  for (const g of otherLocks) {
-    if (placed.has(g.id)) continue;
-    let tv = freeSecs().find(t => t !== diehardTV) || freeSecs()[0];
-    if (!tv) {
-      // Saturation 1.0 with no diehard filled everything: take the last saturated TV.
-      tv = [...secs].reverse().find(t => saturationMap[t.id]);
-      if (tv) saturationMap[tv.id] = false;
-    }
-    if (tv) { sec[tv.id] = g; guaranteedMap[tv.id] = true; placed.add(g.id); }
-  }
-
-  // (b) Diehard screen holds the top demoted game; with nothing demoted it fills by score (§17.A.4).
-  const demoted = byScore.filter(g => g.anchorState === "demoted" && !placed.has(g.id));
-  let diehardGame = null;
-  if (diehardTV && sec[diehardTV.id] === null && demoted.length) {
-    diehardGame = demoted[0];
-    sec[diehardTV.id] = diehardGame;
-    placed.add(diehardGame.id);
-  }
-
-  // (c) Remaining secondaries in TV order, by ChannelScore, no repeats.
-  const pool = byScore.filter(g => !placed.has(g.id));
-  for (const tv of freeSecs()) {
-    const g = pool.shift();
-    if (!g) break;
-    sec[tv.id] = g;
-    placed.add(g.id);
-  }
-
-  // (d) No designated diehard (S < 4): the top demoted game, if still unplaced, drops to the
-  //     secondary showing the lowest ChannelScore (never an anchor) (§17.C).
-  if (!diehardTV && demoted.length && !placed.has(demoted[0].id)) {
-    const g = demoted[0];
-    const replaceable = secs.filter(tv => sec[tv.id] && !saturationMap[tv.id] && !guaranteedMap[tv.id]);
-    if (replaceable.length) {
-      const lowest = replaceable.reduce((lo, tv) => (sec[tv.id].channelScore < sec[lo.id].channelScore ? tv : lo));
-      sec[lowest.id] = g;
-      placed.add(g.id);
-      diehardGame = g;
-    }
-  }
-
-  return {
-    anchors: anchorResult.assignments,
-    anchorMode: anchorResult.mode,
-    secondaries: sec,
-    saturationMap,
-    guaranteedMap,
-    saturationTarget,
-    lockGame: primary,
-    lockItem: primaryItem,
-    otherLocks,
-    diehardGame,
-    allGames: games
-  };
+function distinctTarget(totalTVs) {
+  return Math.min(MAX_DISTINCT_ITEMS, Math.ceil(totalTVs / 3));
 }
 
 function tvMap(a, tv) {
   return tv.role === "anchor" ? a.anchors : a.secondaries;
 }
 
-function emptyTVs(a, venue) {
-  return venue.tvs.filter(tv => !tvMap(a, tv)[tv.id]);
+function isTVFree(a, tv) {
+  return !tvMap(a, tv)[tv.id] && !a.programming[tv.id];
 }
 
-function tvCountsByGame(a) {
-  const counts = new Map();
-  [...Object.values(a.anchors), ...Object.values(a.secondaries)].forEach(g => {
-    if (g) counts.set(g.id, (counts.get(g.id) || 0) + 1);
-  });
-  return counts;
+function gameItem(g) {
+  return { kind: "game", id: g.id, game: g, channel: g.displayChannel, strength: g.channelScore };
 }
 
-// Fill empty TVs with `ranked` games (best first), round-robin — #1 gets the first
-// free TV, then #2, … then #1 again — each game up to its share cap. Anchors never
-// take a demoted game. The primary lock game is never added here (saturation sets
-// its share). Marks TVs a game already had as repeats.
-function fillWithCaps(a, venue, ranked, tier) {
+function programItem(e) {
+  return { kind: "program", id: `prog:${e.channel}:${e.show}`, channel: e.channel, show: e.show,
+           strength: e.priority, priority: e.priority, verify: !!e.verify, source: "grid" };
+}
+
+function placeItem(a, tv, item) {
+  if (item.kind === "game") tvMap(a, tv)[tv.id] = item.game;
+  else a.programming[tv.id] = { channel: item.channel, show: item.show, priority: item.priority, verify: item.verify, source: item.source };
+}
+
+// Integer split of `total` by weight: each item starts at mins[i] and is never
+// above maxes[i]; each further TV goes to the item furthest below its ideal
+// (weight-proportional) share. Equivalent to largest remainder with bounds.
+function proportionalSplit(total, weights, mins, maxes) {
+  const out = mins.map((m, i) => Math.min(m, maxes[i]));
+  let left = total - out.reduce((x, y) => x + y, 0);
+  const w = weights.map(x => Math.max(x, 0.0001));
+  while (left > 0) {
+    const open = out.map((_, i) => i).filter(i => out[i] < maxes[i]);
+    if (!open.length) break;
+    const wSum = open.reduce((s, i) => s + w[i], 0);
+    const pool = open.reduce((s, i) => s + out[i], 0) + left;
+    const gap = i => (w[i] / wSum) * pool - out[i];
+    const best = open.reduce((b, i) => (gap(i) > gap(b) ? i : b), open[0]);
+    out[best]++;
+    left--;
+  }
+  return out;
+}
+
+// scored: available eligible (+ filler) games, scored, watchable now.
+function programTVs(scored, fillerScored, lockResult, venue, history, now, grid) {
   const N = venue.tvs.length;
-  const lockId = a.lockGame ? a.lockGame.id : null;
-  const games = ranked.filter(g => g.id !== lockId && !INACTIVE_STATUSES.has(g.gameStatus));
-  const counts = tvCountsByGame(a);
-  let progress = true;
-  while (progress) {
-    progress = false;
-    for (const g of games) {
-      if ((counts.get(g.id) || 0) >= shareCap(g, N)) continue;
-      const tv = emptyTVs(a, venue).find(t => !(t.role === "anchor" && g.anchorState === "demoted"));
-      if (!tv) return;
-      if (counts.get(g.id)) a.repeatMap[tv.id] = true;
-      tvMap(a, tv)[tv.id] = g;
-      a.tierMap[tv.id] = tier;
-      counts.set(g.id, (counts.get(g.id) || 0) + 1);
-      progress = true;
+  const A = venue.anchors.length;
+  const K = distinctTarget(N);
+  const lockedIds = new Set();
+  if (lockResult.primary) lockedIds.add(lockResult.primary.game.id);
+  lockResult.others.forEach(m => lockedIds.add(m.game.id));
+
+  const withState = list => list.map(g => ({ ...g, anchorState: getAnchorState(g, venue, lockedIds, history) }));
+  const games = withState(scored);
+  const filler = withState(fillerScored);
+  [...games, ...filler].filter(g => g.anchorState === "demoted").forEach(g => history.demoted.add(g.id));
+  const byId = new Map([...games, ...filler].map(g => [g.id, g]));
+
+  const a = {
+    anchors: {}, secondaries: {}, programming: {}, saturationMap: {}, guaranteedMap: {}, repeatMap: {},
+    lockGame: null, lockItem: null, otherLocks: [], saturationTarget: 0, diehardGame: null,
+    items: [], distinctTarget: K, anchorMode: "", allGames: [...games, ...filler]
+  };
+  venue.anchors.forEach(tv => { a.anchors[tv.id] = null; });
+  venue.secondaries.forEach(tv => { a.secondaries[tv.id] = null; a.saturationMap[tv.id] = false; a.guaranteedMap[tv.id] = false; });
+  const used = []; // items on screen, in rank order
+  const free = () => venue.tvs.filter(tv => isTVFree(a, tv));
+  const freeSecondaries = () => venue.secondaries.filter(tv => isTVFree(a, tv));
+
+  // 1. Lock game + saturation.
+  if (lockResult.primary) {
+    const g = byId.get(lockResult.primary.game.id);
+    a.lockGame = g;
+    a.lockItem = lockResult.primary.item;
+    const eligibleSecs = venue.secondaries.filter(tv => tv.saturationEligible);
+    a.saturationTarget = computeSaturationCount(venue.secondaries.length, eligibleSecs.length, a.lockItem.saturation);
+    venue.anchors.forEach(tv => { a.anchors[tv.id] = g; });
+    eligibleSecs.slice(0, a.saturationTarget).forEach(tv => { a.secondaries[tv.id] = g; a.saturationMap[tv.id] = true; });
+    used.push(gameItem(g));
+    a.anchorMode = "lock";
+  }
+  // Other live lock games: guaranteed 1 TV each (§17.A.3).
+  for (const m of lockResult.others) {
+    const g = byId.get(m.game.id);
+    const tv = freeSecondaries().find(t => t.id !== venue.diehardId) || freeSecondaries()[0];
+    if (!g || !tv) continue;
+    a.secondaries[tv.id] = g; a.guaranteedMap[tv.id] = true;
+    a.otherLocks.push(g);
+    used.push(gameItem(g));
+  }
+  // Demoted game → diehard TV (or the last free secondary). Never a Main TV.
+  const demoted = [...games, ...filler].filter(g => g.anchorState === "demoted" && !lockedIds.has(g.id))
+    .sort((x, y) => y.channelScore - x.channelScore)[0];
+  if (demoted) {
+    const fs = freeSecondaries();
+    const tv = fs.find(t => t.id === venue.diehardId) || fs[fs.length - 1];
+    if (tv) { a.secondaries[tv.id] = demoted; a.diehardGame = demoted; used.push(gameItem(demoted)); }
+  }
+
+  // 2–3. Candidates: games and grid shows, by strength. A channel carrying a game
+  // right now isn't showing its grid entry, so those entries drop out.
+  const usedIds = new Set(used.map(i => i.id));
+  const gameChannels = new Set([...games, ...filler].map(g => g.displayChannel).filter(Boolean));
+  const seenChannels = new Set();
+  const gridItems = grid
+    .filter(e => !gameChannels.has(e.channel))
+    .filter(e => (seenChannels.has(e.channel) ? false : seenChannels.add(e.channel)))
+    .map(programItem);
+  const byStrength = (x, y) => y.strength - x.strength || (x.kind === "game" ? -1 : 1);
+  let candidates = [...games.filter(g => !usedIds.has(g.id) && g.anchorState !== "demoted").map(gameItem), ...gridItems].sort(byStrength);
+  const extraFiller = filler.filter(g => !usedIds.has(g.id) && g.anchorState !== "demoted").map(gameItem).sort(byStrength);
+  let slots = free().length;
+  let kLeft = Math.max(K - used.length, slots > 0 ? 1 : 0);
+  if (candidates.length < kLeft) candidates = [...candidates, ...extraFiller];
+  let picked = candidates.slice(0, Math.min(kLeft, slots));
+  let reserve = candidates.slice(picked.length);
+  // Main TVs need a #1 item when there's no lock.
+  if (!a.lockGame && picked.length) a.anchorMode = "main = #1";
+
+  // 4. Share TVs: proportional to strength, ≥1 each, Main TVs to #1, caps on games.
+  const capOf = it => (it.kind === "game" ? shareCap(it.game, N) : Infinity);
+  let counts = [];
+  for (let guard = 0; guard < 10 && picked.length; guard++) {
+    const mins = picked.map((it, i) => (i === 0 && !a.lockGame ? A : 1)); // Main TVs show #1 (cap permitting)
+    const maxes = picked.map(capOf);
+    counts = proportionalSplit(slots, picked.map(it => it.strength), mins, maxes);
+    if (counts.reduce((x, y) => x + y, 0) >= slots || !reserve.length) break;
+    picked = [...picked, reserve.shift()]; // every pick hit its cap: bring in the next known item
+  }
+
+  // Place: Main TVs show #1 (no lock), then the rest round-robin from #2 so items spread out.
+  const remaining = counts.slice();
+  if (!a.lockGame && picked.length) {
+    for (const tv of venue.anchors) {
+      if (!isTVFree(a, tv) || remaining[0] <= 0) continue;
+      placeItem(a, tv, picked[0]); remaining[0]--;
     }
   }
+  const order = picked.length > 1 ? [...picked.keys()].slice(1).concat(0) : [0];
+  let cursor = 0;
+  for (const tv of free()) {
+    let tries = 0;
+    while (tries < order.length && !(remaining[order[cursor % order.length]] > 0)) { cursor++; tries++; }
+    if (tries >= order.length) break;
+    const i = order[cursor % order.length];
+    placeItem(a, tv, picked[i]); remaining[i]--; cursor++;
+  }
+  a.items = [...used, ...picked];
+
+  // 5. Nothing at all known to be on: fall back to the always-available channels.
+  const known = a.items.length > 0;
+  if (!known) {
+    free().forEach((tv, i) => {
+      const ch = ALWAYS_AVAILABLE_CHANNELS[i % Math.min(K, ALWAYS_AVAILABLE_CHANNELS.length)];
+      a.programming[tv.id] = { channel: ch, show: null, source: "always" };
+    });
+  }
+  // Still free (every known item at its cap): left to the venue.
+  free().forEach(tv => { if (!a.programming[tv.id]) a.programming[tv.id] = null; });
+
+  // Repeat markers and anchor history.
+  const seen = new Set();
+  venue.tvs.forEach(tv => {
+    const g = tvMap(a, tv)[tv.id];
+    if (!g) return;
+    if (seen.has(g.id)) a.repeatMap[tv.id] = true;
+    seen.add(g.id);
+  });
+  Object.values(a.anchors).forEach(g => {
+    if (g && !lockedIds.has(g.id) && g.channelScore >= venue.thresholds.blowoutDemotion) history.anchored.add(g.id);
+  });
+  return a;
 }
 
 // Sports with a game on today's (US Eastern) slate, for gameDayOnly grid entries.
@@ -299,66 +297,25 @@ function sportsWithGamesToday(games, now) {
   return set;
 }
 
-// Leftover TVs → programming grid (airing now, by priority), then the always-available
-// list. No channel is used twice by non-game TVs, and a channel already carrying a
-// game on some TV isn't reused. TVs that still have nothing are left to the venue.
-function assignProgramming(a, venue, now, sportsToday) {
-  a.programming = {};
-  const used = new Set(
-    [...Object.values(a.anchors), ...Object.values(a.secondaries)].filter(Boolean).map(g => g.displayChannel).filter(Boolean)
-  );
-  const options = [
-    ...programmingAiringNow(now, sportsToday).map(e => ({ channel: e.channel, show: e.show, source: "grid", priority: e.priority, verify: !!e.verify })),
-    ...ALWAYS_AVAILABLE_CHANNELS.map(c => ({ channel: c, show: null, source: "always" }))
-  ];
-  for (const tv of emptyTVs(a, venue)) {
-    const pick = options.find(o => !used.has(o.channel));
-    if (!pick) { a.programming[tv.id] = null; continue; }
-    used.add(pick.channel);
-    a.programming[tv.id] = pick;
-  }
-}
-
-// Full cycle (Phase 6):
-//   availability + tiers → watchable now → lock + saturation → eligible games (caps)
-//   → filler games (caps) → programming grid → always-available channels.
-// `history` (from createAnchorHistory) carries anchor/demotion state between cycles.
-function runAssignmentCycle(games, venue, history = createAnchorHistory(), now = new Date()) {
+// Full cycle: availability + tiers → watchable now → locks (identity) → score →
+// programTVs. `history` carries anchor/demotion state between cycles.
+// opts.programming: an explicit list of {channel, show, priority} airing now
+// (golden scenarios); default is the grid in config/programming.js.
+function runAssignmentCycle(games, venue, history = createAnchorHistory(), now = new Date(), opts = {}) {
   const classified = games.map(g => ({ ...g, ...classifyGame(g, venue), watchableNow: isWatchableNow(g, now) }));
   const eligibleNow = classified.filter(g => g.tier === "eligible" && g.watchableNow);
   const fillerNow = classified.filter(g => g.tier === "filler" && g.watchableNow);
-  // Locks, anchors and the first pass run on eligible games; filler only leads when nothing eligible is on.
-  const pool = eligibleNow.length ? eligibleNow : fillerNow;
+  const lockPool = eligibleNow.length ? eligibleNow : fillerNow;
 
-  const lockResult = resolveLocks(pool, venue);        // before scoring, by identity
-  const scored = scoreGames(pool, venue);
-  const a = createTVAssignments(scored, lockResult, venue, history);
-  a.repeatMap = {};
-  a.tierMap = {};
-  venue.tvs.forEach(tv => { const g = tvMap(a, tv)[tv.id]; if (g) a.tierMap[tv.id] = g.tier; });
-
-  // The first pass places each game once; caps also apply to it.
-  const N = venue.tvs.length;
-  const counts = tvCountsByGame(a);
-  const lockId = a.lockGame ? a.lockGame.id : null;
-  venue.tvs.forEach(tv => {
-    const g = tvMap(a, tv)[tv.id];
-    if (!g || g.id === lockId) return;
-    if (counts.get(g.id) > shareCap(g, N)) { tvMap(a, tv)[tv.id] = null; delete a.tierMap[tv.id]; counts.set(g.id, counts.get(g.id) - 1); }
-  });
-
-  const byScore = list => [...list].sort((x, y) => y.channelScore - x.channelScore);
-  fillWithCaps(a, venue, byScore(a.allGames), pool === eligibleNow ? "eligible" : "filler");
-  let fillerScored = [];
-  if (eligibleNow.length && fillerNow.length) {
-    fillerScored = scoreGames(fillerNow, venue).map(g => ({ ...g, anchorState: getAnchorState(g, venue, new Set(), history) }));
-    fillWithCaps(a, venue, byScore(fillerScored), "filler");
-  }
-  assignProgramming(a, venue, now, sportsWithGamesToday(games, now));
+  const lockResult = resolveLocks(lockPool, venue);        // before scoring, by identity
+  const scored = scoreGames(eligibleNow.length ? eligibleNow : fillerNow, venue);
+  const fillerScored = eligibleNow.length ? scoreGames(fillerNow, venue) : [];
+  const grid = opts.programming || programmingAiringNow(now, sportsWithGamesToday(games, now));
+  const a = programTVs(scored, fillerScored, lockResult, venue, history, now, grid);
   a.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
 
   // Everything, for the details view. Unavailable and excluded games are never scored.
-  const scoredById = new Map([...a.allGames, ...fillerScored].map(g => [g.id, g]));
+  const scoredById = new Map(a.allGames.map(g => [g.id, g]));
   const rest = scoreGames(classified.filter(g => (g.tier === "eligible" || g.tier === "filler") && !scoredById.has(g.id)), venue);
   rest.forEach(g => scoredById.set(g.id, g));
   a.catalog = classified.map(g => scoredById.get(g.id) || g);

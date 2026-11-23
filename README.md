@@ -49,6 +49,8 @@ node tests/validate.js && node tests/version-check.js
 | `node tests/validate.js` | Algorithm: lock list, saturation table, anchor rules, diehard/demotion, market tables |
 | `node tests/version-check.js` | Cache busting: `APP_VERSION` bumped, every file goes through the versioned loader |
 | `node tests/proxy.test.mjs` | Worker allowlist, CORS and caching against a stubbed ESPN |
+| `node tests/golden.js [filter]` | Golden scenarios in `tests/golden/`: runs the engine on human-written expected TV assignments and reports per-TV expected vs. actual and an overall match %. A tuning report, not pass/fail. |
+| `NODE_USE_ENV_PROXY=1 node tests/golden-snapshot.js <ISO time>` | Snapshots the live slate (through the Worker) as the `games` for a new golden scenario |
 | `NODE_USE_ENV_PROXY=1 node tests/live-check.js [market]` | Live feed through the deployed Worker: games per league, normalization failures, team-name matches |
 
 ## Live data

@@ -1,0 +1,6 @@
+# Cloudflare Worker config for the AutoChannel ESPN proxy.
+# Deploy from this folder with: npx wrangler deploy
+name = "autochannel-proxy"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = true

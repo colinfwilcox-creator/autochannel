@@ -742,3 +742,14 @@ tbody tr:hover {
 .mode-toggle button:disabled { opacity: 0.4; cursor: not-allowed; }
 .feed-status { margin-top: 10px; }
 .empty-state { color: #aaa; }
+
+/* ---------- Build version footer ---------- */
+.app-footer {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 12px 20px 24px;
+  font-size: 11px;
+  color: #666;
+  font-family: "Monaco", "Courier New", monospace;
+  text-align: center;
+}

@@ -472,8 +472,15 @@ function updateStatus(text) {
   if (status) status.textContent = text;
 }
 
-window.addEventListener("DOMContentLoaded", () => {
+// Scripts are added by the versioned loader in index.html, so DOMContentLoaded
+// may already have fired by the time this runs.
+function startApp() {
   displayDashboard();
   fetchAndUpdate();
   setInterval(fetchAndUpdate, 60000);
-});
+}
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", startApp);
+} else {
+  startApp();
+}

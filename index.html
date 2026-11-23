@@ -4,7 +4,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AutoChannel — Live Game Dashboard</title>
-  <link rel="stylesheet" href="styles.css">
+  <!-- Base colours until styles.css arrives, so there's no white flash. -->
+  <style>html, body { background: #0a0a0a; color: #e0e0e0; }</style>
+  <script>
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ APP_VERSION: the ONE place the front-end version lives.              │
+    // │ Bump it in every commit that changes index.html, app.js, styles.css, │
+    // │ config/*.js or modules/*.js. Format: YYYY.MM.DD-N. See README.       │
+    // └─────────────────────────────────────────────────────────────────────┘
+    window.APP_VERSION = "2026.11.23-1";
+
+    // Every stylesheet and script is requested as file?v=APP_VERSION, so a new
+    // version is a new URL and browsers can't serve the old file from cache.
+    window.versioned = function (path) {
+      return path + "?v=" + encodeURIComponent(window.APP_VERSION);
+    };
+    (function () {
+      var css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = window.versioned("styles.css");
+      document.head.appendChild(css);
+    })();
+  </script>
 </head>
 <body>
   <header>
@@ -25,20 +46,30 @@
     </div>
   </main>
 
-  <!-- Load config first -->
-  <script src="config/venue.js"></script>
-  <script src="config/markets.js"></script>
-  <script src="config/national.js"></script>
-  <script src="config/sports.js"></script>
-  <script src="config/live.js"></script>
+  <footer class="app-footer">AutoChannel build <span id="app-version"></span></footer>
 
-  <!-- Load modules -->
-  <script src="modules/fetcher.js"></script>
-  <script src="modules/scorer.js"></script>
-  <script src="modules/venue.js"></script>
-  <script src="modules/display.js"></script>
+  <script>
+    document.getElementById("app-version").textContent = window.APP_VERSION;
 
-  <!-- Load main app logic last -->
-  <script src="app.js"></script>
+    // Load order matters: config, then modules, then app.js.
+    // async = false makes dynamically added scripts run in this order.
+    [
+      "config/venue.js",
+      "config/markets.js",
+      "config/national.js",
+      "config/sports.js",
+      "config/live.js",
+      "modules/fetcher.js",
+      "modules/scorer.js",
+      "modules/venue.js",
+      "modules/display.js",
+      "app.js"
+    ].forEach(function (src) {
+      var s = document.createElement("script");
+      s.src = window.versioned(src);
+      s.async = false;
+      document.body.appendChild(s);
+    });
+  </script>
 </body>
 </html>

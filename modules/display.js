@@ -63,9 +63,11 @@ function resolveLocks(games, venue) {
 
 // ---------- Saturation (§17.A.2) ----------
 
+// Keep ≥1 secondary independent (sat < 1). The diehard screen, when there is one,
+// is that independent secondary: eligible excludes it, so eligible ≤ S − 1 already.
 function computeSaturationCount(S, eligible, sat) {
   let n = Math.min(Math.round(S * sat), eligible);
-  if (sat < 1.0) n = Math.min(n, Math.max(eligible - 1, 0)); // keep ≥1 secondary independent
+  if (sat < 1.0) n = Math.min(n, Math.max(S - 1, 0));
   return n;
 }
 

@@ -473,5 +473,41 @@ const clock = run(`(() => { const g = { ...${mnfG}, gameStatus: "scheduled", esp
   return [getGamePhaseWeight(g, new Date("2026-11-24T00:00:00Z")), getGamePhaseWeight(g, new Date("2026-11-24T01:00:00Z"))]; })()`);
 check(clock[0] === 0.4 && clock[1] === 0.6, `pre-game weight uses the cycle's clock, not the wall clock (75 min out ${clock[0]}, 15 min out ${clock[1]})`);
 
+// ---------- National lock + win-probability fallback ----------
+h("NL  National lock and win-probability fallback");
+const nlVit = run(`(() => {
+  const g = { sport: "NHL", gameStatus: "in_progress", gamePhase: 0.5, homeScore: 2, awayScore: 1, winProbability: null };
+  return { none: calculateVitality(g), even: calculateVitality({ ...g, winProbability: 0.5 }), p60: calculateVitality({ ...g, winProbability: 0.6 }) };
+})()`);
+check(nlVit.none === nlVit.p60 && nlVit.none === 80 && nlVit.even === 100, `no win probability → BaseTension 80, same as 0.6 (null ${nlVit.none}, 0.6 ${nlVit.p60}, 0.5 ${nlVit.even})`);
+
+run(`var __slate = JSON.parse(${JSON.stringify(JSON.stringify(JSON.parse(require("fs").readFileSync(path.join(root, "tests/golden/02-mon-mnf-albany-9tv.json"), "utf8")).games))});
+  var __at803 = new Date("2026-11-23T20:03:00-05:00");
+  var __lockFor = (market, n, games = __slate, at = __at803) => { const v = buildVenue({ marketId: market, totalTVs: n });
+    const a = runAssignmentCycle(games, v, createAnchorHistory(), at);
+    return { lock: a.lockGame && a.lockGame.homeTeam, trigger: a.lockItem && a.lockItem.trigger, sat: a.saturationTarget, A: v.anchors.length,
+             tvs: a.lockGame ? countTVsForGame(a, a.lockGame.id).total : 0,
+             others: a.otherLocks.map(g => g.homeTeam + ":" + countTVsForGame(a, g.id).total) }; };`);
+const nlNy = run(`__lockFor("new-york", 9)`);
+check(nlNy.lock === "Washington Commanders" && nlNy.trigger === "national" && nlNy.tvs === nlNy.A + nlNy.sat && nlNy.sat === 2,
+  `New York 8:03 PM, 9 TVs: national lock on MNF → ${nlNy.A} Main + ${nlNy.sat} saturated (0.30) = ${nlNy.tvs} TVs`);
+const nlDc = run(`__lockFor("washington-dc", 15)`);
+check(nlDc.lock === "Washington Commanders" && nlDc.trigger === "any_game" && nlDc.tvs === 12, `DC 8:03 PM, 15 TVs: the market lock (any_game, 0.70) wins → ${nlDc.tvs} TVs`);
+const nlStl = run(`(() => { const blues = { ...__slate.find(g => g.homeTeam === "Toronto Maple Leafs" || g.awayTeam === "Toronto Maple Leafs"),
+    id: "blues", homeTeam: "St. Louis Blues", awayTeam: "Chicago Blackhawks", nationalChannels: ["ESPN2"], regionalChannels: [] };
+  return __lockFor("st-louis", 9, [...__slate, blues]); })()`);
+check(nlStl.lock === "St. Louis Blues" && nlStl.others.some(o => o.startsWith("Washington Commanders:1")),
+  `market lock (Blues) + national lock (MNF) at once: Blues take the Mains; MNF guaranteed a TV (${nlStl.others.join(", ")})`);
+const nlEarly = run(`__lockFor("new-york", 9, __slate, new Date("2026-11-23T19:30:00-05:00"))`);
+check(nlEarly.lock === null, "national lock not active 45 minutes before kickoff (window opens 30 minutes before)");
+const nlDem = run(`(() => { const v = buildVenue({ marketId: "new-york", totalTVs: 9 });
+  const g = __slate.find(x => x.sport === "NFL");
+  const blowout = { ...g, espnState: "in", gameStatus: "in_progress", gamePhase: 0.9, homeScore: 45, awayScore: 3, winProbability: 0.99 };
+  const hist = createAnchorHistory(); hist.anchored.add(g.id);
+  const a = runAssignmentCycle([blowout], v, hist, __at803);
+  return { state: a.lockGame && a.lockGame.anchorState, cs: a.lockGame && a.lockGame.channelScore }; })()`);
+check(nlDem.state !== "demoted", `national-lock game is exempt from demotion (blowout CS ${nlDem.cs && nlDem.cs.toFixed(1)}, state ${nlDem.state})`);
+check(run(`generateLockList(MARKETS["new-york"]).find(i => i.event === "Super Bowl").saturation`) === 1, "Super Bowl stays on the market lock lists at saturation 1.0");
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures ? 1 : 0);

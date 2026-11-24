@@ -67,6 +67,8 @@ function calculateBaseScore(game, venue) {
   );
 }
 
+const WIN_PROBABILITY_FALLBACK = 0.6;
+
 // ---------- National stature floor ----------
 const FLOOR_LEAGUES = new Set(["MLB", "NBA", "NHL"]);
 
@@ -191,7 +193,9 @@ function getOvertimeBonus(game) {
 
 function calculateVitality(game, now = new Date()) {
   // BaseTension from win probability
-  let baseTension = 100;
+  // Spec §5.1 fallback: no win probability → treat as 0.6 for the favorite (BaseTension 80),
+  // not a 50/50 game.
+  let baseTension = 100 - (Math.abs(WIN_PROBABILITY_FALLBACK - 0.5) * 200);
   if (game.winProbability !== null && game.winProbability !== undefined) {
     baseTension = 100 - (Math.abs(game.winProbability - 0.5) * 200);
   }

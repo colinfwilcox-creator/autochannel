@@ -36,7 +36,8 @@ function lockItemMatches(item, game) {
 }
 
 // Returns { primary: {game, item} | null, others: [{game, item}] }.
-// Priority = position in lockList. A game matching several entries takes the earliest.
+// Priority: market lock list in its order, then national locks (nationalFloor ≥ 80,
+// highest floor first). A game matching several entries takes the earliest.
 function resolveLocks(games, venue) {
   const matches = [];
   const claimed = new Set();
@@ -49,6 +50,14 @@ function resolveLocks(games, venue) {
       }
     }
   });
+  games
+    .filter(g => (g.nationalFloor || 0) >= NATIONAL_LOCK_MIN_FLOOR && !claimed.has(g.id) && isLockWindowOpen(g, venue))
+    .sort((a, b) => b.nationalFloor - a.nationalFloor)
+    .forEach(g => {
+      matches.push({ game: g, item: { event: g.nationalFloorReason || "national", trigger: "national", national: true,
+                                      anchorMode: "all-anchors", saturation: NATIONAL_LOCK_SATURATION } });
+      claimed.add(g.id);
+    });
   return { primary: matches[0] || null, others: matches.slice(1) };
 }
 

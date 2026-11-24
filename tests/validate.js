@@ -295,7 +295,8 @@ const av = [
   ["Capitals on Monumental, St. Louis", "__caps", "__stl", false, null],
   ["Orioles on MASN, DC", "__g({ sport: 'MLB', homeTeam: 'Baltimore Orioles', awayTeam: 'New York Yankees', nationalChannels: [], regionalChannels: [{ channel: 'MASN', side: 'home', team: 'Baltimore Orioles' }] })", "__dc", true, "MASN"],
   ["ESPN+ only", "__g({ sport: 'NHL', homeTeam: 'Calgary Flames', awayTeam: 'Ottawa Senators', nationalChannels: [], streamingChannels: ['ESPN+'] })", "__dc", false, null],
-  ["NBCSN (not on the national list)", "__g({ sport: 'NBA', homeTeam: 'Minnesota Timberwolves', awayTeam: 'Brooklyn Nets', nationalChannels: ['NBCSN'] })", "__dc", false, null],
+  ["NBCSN (national since its Nov 2025 relaunch)", "__g({ sport: 'NBA', homeTeam: 'Minnesota Timberwolves', awayTeam: 'Brooklyn Nets', nationalChannels: ['NBCSN'] })", "__dc", true, "NBCSN"],
+  ["NBC Sports BA (regional, not NBCSN), DC", "__g({ sport: 'NHL', homeTeam: 'San Jose Sharks', awayTeam: 'Minnesota Wild', nationalChannels: [], regionalChannels: [{ channel: 'NBC Sports BA', side: 'home', team: 'San Jose Sharks' }] })", "__dc", false, null],
   ["no TV listed", "__g({ sport: 'NBA', homeTeam: 'X', awayTeam: 'Y', nationalChannels: [] })", "__dc", false, null]
 ];
 for (const [label, g, v, want, ch] of av) {

@@ -6,7 +6,8 @@
 const NATIONAL_CHANNELS = [
   "ESPN", "ESPN2", "ABC", "CBS", "NBC", "FOX", "FS1", "TNT", "TBS", "truTV",
   "NFL Network", "NBA TV", "NHL Network", "MLB Network",
-  "Big Ten Network", "SEC Network", "ACC Network", "CBS Sports Network"
+  "Big Ten Network", "SEC Network", "ACC Network", "CBS Sports Network",
+  "NBCSN"                                    // NBC Sports Network, relaunched Nov 17, 2025 (Monday NBA, EPL, WNBA, …)
 ];
 
 // ESPN feed spelling → the name used everywhere in the app.
@@ -20,6 +21,7 @@ const CHANNEL_ALIASES = {
   "SECN": "SEC Network",
   "ACCN": "ACC Network",                     // "ACC Network" also seen as-is
   "CBSSN": "CBS Sports Network",
+  "NBC Sports Network": "NBCSN",             // ESPN sends "NBCSN" (seen); regional "NBC Sports BA" etc. stay as-is
   "MNMT": "Monumental Sports Network",       // seen on every Capitals/Wizards game
   "MNMT2": "Monumental Sports Network 2"
 };

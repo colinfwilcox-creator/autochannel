@@ -438,5 +438,40 @@ check(one.n === 1 && one.A === 1 && one.g === "Washington Commanders", `1-TV ven
 const five = run(`buildVenue({ marketId: "washington-dc", totalTVs: 5 })`);
 check(five.anchors.length === 1 && five.secondaries.length === 4, "5 TVs → 1 main + 4 others (clamp(round(5 × 0.25), 1, 4))");
 
+// ---------- National stature floor ----------
+h("NF  National stature floor: Relevance = max(local, floor)");
+run(`var __nfl = (id, iso, o = {}) => ({ id, sport: "NFL", homeTeam: "Washington Commanders", awayTeam: "Cincinnati Bengals",
+    scheduledStartTime: iso, nationalChannels: ["ESPN"], isPlayoff: false, playoffRound: null, eventName: null, ...o });`);
+const nf = (g, slate) => run(`nationalFloorOf(${g}, ${slate || "[]"})`);
+const mnfG = `__nfl("mnf", "2026-11-24T01:15:00Z")`;
+check(nf(mnfG, `[${mnfG}]`).floor === 80, `MNF 8:15 PM ET, only NFL game in its window, on ESPN → 80 (${nf(mnfG, `[${mnfG}]`).reason})`);
+const early = `__nfl("e", "2026-11-22T18:00:00Z")`;
+check(nf(early, `[${early}, __nfl("e2", "2026-11-22T18:00:00Z")]`).floor === 45, "Sunday 1 PM ET game → 45 (any other NFL game)");
+const snfA = `__nfl("a", "2026-11-23T01:20:00Z")`, snfB = `__nfl("b", "2026-11-23T01:20:00Z")`;
+check(nf(snfA, `[${snfA}, ${snfB}]`).floor === 45, "two overlapping primetime NFL games → not standalone → 45");
+const prime = `__nfl("p", "2026-11-27T01:15:00Z", { nationalChannels: [], streamingChannels: ["Prime Video"] })`;
+check(nf(prime, `[${prime}]`).floor === 45, "primetime but streaming-only (no national channel) → 45");
+const tday = `__nfl("t", "2026-11-26T17:30:00Z")`;
+check(nf(tday, `[${tday}, __nfl("t2", "2026-11-26T21:30:00Z")]`).floor === 80, "Thanksgiving 12:30 PM ET, only game in its window → 80");
+check(nf(`__nfl("po", "2027-01-10T21:30:00Z", { isPlayoff: true, playoffRound: "first_round" })`).floor === 85, "NFL playoffs → 85");
+check(nf(`__nfl("sb", "2027-02-14T23:30:00Z", { isPlayoff: true, playoffRound: "championship", eventName: "Super Bowl" })`).floor === 95, "Super Bowl → 95");
+const og = (sport, round, extra = "") => `({ id: "x", sport: "${sport}", isPlayoff: ${round ? "true" : "false"}, playoffRound: ${round ? `"${round}"` : "null"}, homeTeam: "H", awayTeam: "A"${extra} })`;
+check(nf(og("MLB", "championship")).floor === 95 && nf(og("NBA", "championship")).floor === 95 && nf(og("NHL", "championship")).floor === 95, "World Series / NBA Finals / Stanley Cup Final → 95");
+check(nf(og("MLB", "conf_finals")).floor === 70 && nf(og("NHL", "conf_semi")).floor === 55 && nf(og("NBA", "first_round")).floor === 55, "conference finals → 70; earlier rounds → 55");
+check(nf(og("CFB", "championship")).floor === 95, "CFP Championship → 95");
+check(nf(og("CFB", "conf_semi", `, eventName: "College Football Playoff Semifinal at the Rose Bowl"`)).floor === 70, "CFP semifinal → 70");
+check(nf(og("CFB", null, ", homeTeamRank: 4, awayTeamRank: 9")).floor === 55 && nf(og("CFB", null, ", homeTeamRank: 4, awayTeamRank: 12")).floor === 0, "top-10 vs top-10 CFB → 55; top-10 vs #12 → no floor");
+check(nf(og("CBB", "championship")).floor === 0 && nf(og("NBA", null)).floor === 0, "no floor for events outside the table (e.g. regular-season NBA, CBB final)");
+const relNy = run(`(() => { const v = buildVenue({ marketId: "new-york", totalTVs: 9 });
+  const g = { ...${mnfG}, gameStatus: "scheduled", espnState: "pre", homeScore: 0, awayScore: 0, gamePhase: 0, nationalFloor: 80 };
+  return { withFloor: calculateRelevance(g, v), without: calculateRelevance({ ...g, nationalFloor: 0 }, v) }; })()`);
+check(relNy.withFloor === 80 && relNy.without < 20, `New York: MNF relevance ${relNy.without.toFixed(1)} locally → ${relNy.withFloor} with the floor`);
+const relDc = run(`(() => { const v = buildVenue({ marketId: "washington-dc", totalTVs: 9 });
+  const g = { ...${mnfG}, gameStatus: "scheduled", nationalFloor: 80 }; return calculateRelevance(g, v); })()`);
+check(relDc > 80, `DC: local relevance (${relDc.toFixed(1)}) already above the floor, so it wins`);
+const clock = run(`(() => { const g = { ...${mnfG}, gameStatus: "scheduled", espnState: "pre", gamePhase: 0 };
+  return [getGamePhaseWeight(g, new Date("2026-11-24T00:00:00Z")), getGamePhaseWeight(g, new Date("2026-11-24T01:00:00Z"))]; })()`);
+check(clock[0] === 0.4 && clock[1] === 0.6, `pre-game weight uses the cycle's clock, not the wall clock (75 min out ${clock[0]}, 15 min out ${clock[1]})`);
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures ? 1 : 0);

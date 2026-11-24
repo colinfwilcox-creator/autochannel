@@ -353,21 +353,24 @@ function knownProgrammingNow(games, venue, now) {
 // opts.programming: an explicit list of {channel, show, priority} airing now
 // (golden scenarios); default is the grid in config/programming.js.
 function runAssignmentCycle(games, venue, history = createAnchorHistory(), now = new Date(), opts = {}) {
-  const classified = games.map(g => ({ ...g, ...classifyGame(g, venue), watchableNow: isWatchableNow(g, now) }));
+  const classified = games.map(g => {
+    const nf = nationalFloorOf(g, games);
+    return { ...g, nationalFloor: nf.floor, nationalFloorReason: nf.reason, ...classifyGame(g, venue), watchableNow: isWatchableNow(g, now) };
+  });
   const eligibleNow = classified.filter(g => g.tier === "eligible" && g.watchableNow);
   const fillerNow = classified.filter(g => g.tier === "filler" && g.watchableNow);
   const lockPool = eligibleNow.length ? eligibleNow : fillerNow;
 
   const lockResult = resolveLocks(lockPool, venue);        // before scoring, by identity
-  const scored = scoreGames(eligibleNow.length ? eligibleNow : fillerNow, venue);
-  const fillerScored = eligibleNow.length ? scoreGames(fillerNow, venue) : [];
+  const scored = scoreGames(eligibleNow.length ? eligibleNow : fillerNow, venue, now);
+  const fillerScored = eligibleNow.length ? scoreGames(fillerNow, venue, now) : [];
   const grid = opts.programming || knownProgrammingNow(games, venue, now);
   const a = programTVs(scored, fillerScored, lockResult, venue, history, now, grid);
   a.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
 
   // Everything, for the details view. Unavailable and excluded games are never scored.
   const scoredById = new Map(a.allGames.map(g => [g.id, g]));
-  const rest = scoreGames(classified.filter(g => (g.tier === "eligible" || g.tier === "filler") && !scoredById.has(g.id)), venue);
+  const rest = scoreGames(classified.filter(g => (g.tier === "eligible" || g.tier === "filler") && !scoredById.has(g.id)), venue, now);
   rest.forEach(g => scoredById.set(g.id, g));
   a.catalog = classified.map(g => scoredById.get(g.id) || g);
   a.tierCounts = { unavailable: 0, eligible: 0, filler: 0, excluded: 0 };

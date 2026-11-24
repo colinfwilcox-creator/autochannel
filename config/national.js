@@ -29,3 +29,20 @@ const NATIONAL_PROGRAMS = [
   "LSU Tigers",
   "Clemson Tigers"
 ];
+
+// ---------- National stature floor ----------
+// Relevance = max(localRelevance, nationalFloor). The floor comes from the event,
+// regardless of teams or market (applied in modules/scorer.js).
+const NATIONAL_FLOORS = {
+  championship: 95,      // Super Bowl, World Series, NBA Finals, Stanley Cup Final, CFP Championship
+  nflPlayoff: 85,        // NFL playoffs (other rounds)
+  nflPrimetime: 80,      // NFL primetime standalone: MNF, SNF, TNF, Thanksgiving, Christmas
+  confFinals: 70,        // MLB/NBA/NHL conference finals (ALCS/NLCS), CFP semifinals
+  earlyPlayoff: 55,      // MLB/NBA/NHL earlier playoff rounds; top-10 vs top-10 college football
+  nflOther: 45           // any other NFL game
+};
+
+// "Standalone primetime": starts 7 PM ET or later (any time on Thanksgiving or
+// Christmas), on a national channel, and no other NFL game overlaps its window.
+const NFL_PRIMETIME_START_ET = "19:00";
+const NFL_GAME_WINDOW_MINUTES = 210;

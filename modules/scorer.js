@@ -67,6 +67,48 @@ function calculateBaseScore(game, venue) {
   );
 }
 
+// ---------- National stature floor ----------
+const FLOOR_LEAGUES = new Set(["MLB", "NBA", "NHL"]);
+
+function isThanksgivingOrChristmasET(date) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" })
+    .formatToParts(date).reduce((o, x) => (o[x.type] = x.value, o), {});
+  if (p.month === "12" && p.day === "25") return true;
+  const day = Number(p.day);
+  return p.month === "11" && p.weekday === "Thu" && day >= 22 && day <= 28; // 4th Thursday
+}
+
+// NFL games only: primetime (or a holiday), on a national channel, no other NFL game overlapping.
+function isNflPrimetimeStandalone(game, slate) {
+  if (game.sport !== "NFL" || !game.scheduledStartTime) return false;
+  if (!(game.nationalChannels || []).some(c => NATIONAL_CHANNEL_SET.has(c))) return false;
+  const start = new Date(game.scheduledStartTime);
+  const primetime = easternClock(start).minutes >= toMinutes(NFL_PRIMETIME_START_ET) || isThanksgivingOrChristmasET(start);
+  if (!primetime) return false;
+  const win = NFL_GAME_WINDOW_MINUTES * 60000;
+  return !slate.some(o => o.id !== game.id && o.sport === "NFL" && o.scheduledStartTime &&
+    Math.abs(new Date(o.scheduledStartTime) - start) < win);
+}
+
+// → { floor, reason } for the event, regardless of teams or market.
+function nationalFloorOf(game, slate = []) {
+  const F = NATIONAL_FLOORS;
+  const round = game.playoffRound;
+  const headline = String(game.eventName || "");
+  const out = [];
+  if (game.isPlayoff && round === "championship" && (game.sport === "NFL" || game.sport === "CFB" || FLOOR_LEAGUES.has(game.sport))) out.push([F.championship, "championship"]);
+  if (game.sport === "NFL" && game.isPlayoff) out.push([F.nflPlayoff, "NFL playoffs"]);
+  if (isNflPrimetimeStandalone(game, slate)) out.push([F.nflPrimetime, "NFL primetime standalone"]);
+  if (FLOOR_LEAGUES.has(game.sport) && game.isPlayoff && round === "conf_finals") out.push([F.confFinals, "conference finals"]);
+  if (game.sport === "CFB" && game.isPlayoff && /semifinal/i.test(headline)) out.push([F.confFinals, "CFP semifinal"]);
+  if (FLOOR_LEAGUES.has(game.sport) && game.isPlayoff && round !== "conf_finals" && round !== "championship") out.push([F.earlyPlayoff, "playoffs"]);
+  if (game.sport === "CFB" && game.homeTeamRank && game.awayTeamRank && game.homeTeamRank <= 10 && game.awayTeamRank <= 10) out.push([F.earlyPlayoff, "top-10 vs top-10"]);
+  if (game.sport === "NFL") out.push([F.nflOther, "NFL game"]);
+  if (!out.length) return { floor: 0, reason: null };
+  out.sort((a, b) => b[0] - a[0]);
+  return { floor: out[0][0], reason: out[0][1] };
+}
+
 function calculateRelevance(game, venue) {
   const baseTeamScore = calculateBaseScore(game, venue);
 
@@ -75,17 +117,18 @@ function calculateRelevance(game, venue) {
   const seasonWeight = getSportSeasonWeight(game.sport);
   const stakesMod = getStakesModifier(game.sport, game.gameNumber, game.totalGames);
 
-  const relevance = (baseTeamScore + marqueeBonus) * playoffMult * seasonWeight * stakesMod;
-  return Math.min(relevance, 100);
+  const localRelevance = Math.min((baseTeamScore + marqueeBonus) * playoffMult * seasonWeight * stakesMod, 100);
+  // National stature floor: set per game by runAssignmentCycle (needs the whole slate).
+  return Math.max(localRelevance, game.nationalFloor || 0);
 }
 
-function getGamePhaseWeight(game) {
+function getGamePhaseWeight(game, now = new Date()) {
   const phase = game.gamePhase;
 
   // Check if pre-game
   if (phase === 0) {
     const minutesUntilStart = (game.scheduledStartTime ?
-      (new Date(game.scheduledStartTime).getTime() - Date.now()) / 60000 : 30);
+      (new Date(game.scheduledStartTime).getTime() - now.getTime()) / 60000 : 30);
 
     if (minutesUntilStart > 30) return 0.4;
     if (minutesUntilStart > 0) return 0.6;
@@ -146,14 +189,14 @@ function getOvertimeBonus(game) {
   return 1.0;
 }
 
-function calculateVitality(game) {
+function calculateVitality(game, now = new Date()) {
   // BaseTension from win probability
   let baseTension = 100;
   if (game.winProbability !== null && game.winProbability !== undefined) {
     baseTension = 100 - (Math.abs(game.winProbability - 0.5) * 200);
   }
 
-  const gamePhaseWeight = getGamePhaseWeight(game);
+  const gamePhaseWeight = getGamePhaseWeight(game, now);
   const pointInGameMult = getPointInGameMultiplier(game);
   const overtimeBonus = getOvertimeBonus(game);
 
@@ -168,14 +211,15 @@ function combineChannelScore(relevance, vitality) {
   return Math.min(Math.max(score, 0), 100);
 }
 
-function calculateChannelScore(game, venue) {
-  return combineChannelScore(calculateRelevance(game, venue), calculateVitality(game));
+function calculateChannelScore(game, venue, now = new Date()) {
+  return combineChannelScore(calculateRelevance(game, venue), calculateVitality(game, now));
 }
 
-function scoreGames(games, venue) {
+// `now` = the moment being scored (the cycle's clock), never the wall clock.
+function scoreGames(games, venue, now = new Date()) {
   return games.map(game => {
     const relevance = calculateRelevance(game, venue);
-    const vitality = calculateVitality(game);
+    const vitality = calculateVitality(game, now);
     return {
       ...game,
       baseScore: calculateBaseScore(game, venue),

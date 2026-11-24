@@ -54,7 +54,7 @@ function runScenario(file) {
     return { slots, items: a.items.map(i => ({ kind: i.kind, channel: i.channel, label: i.kind === "game" ? i.game.awayTeam + " @ " + i.game.homeTeam : (i.show || "league network"), strength: i.strength,
                                                 cap: i.kind === "game" ? shareCap(i.game, v.tvs.length) : null })),
              airing: airing.map(e => e.channel + " · " + (e.show || "league network" + (e.teamDay ? ", team plays today" : "")) + " (" + e.priority + " → " + (e.priority * TUNING.showWeight).toFixed(2) + ")"),
-             watchable: a.allGames.map(g => g.displayChannel + " · " + g.awayTeam + " @ " + g.homeTeam + " CS " + g.channelScore.toFixed(1) + " cap " + shareCap(g, v.tvs.length)),
+             watchable: a.allGames.map(g => g.displayChannel + " · " + g.awayTeam + " @ " + g.homeTeam + " CS " + g.channelScore.toFixed(1) + " (rel " + g.relevance.toFixed(1) + (g.nationalFloor ? ", floor " + g.nationalFloor + " " + g.nationalFloorReason : "") + ", vit " + g.vitality.toFixed(1) + ") cap " + shareCap(g, v.tvs.length)),
              target: a.distinctTarget, marketName: v.marketName, mode: a.anchorMode };
   })()`);
 

@@ -366,6 +366,15 @@ check(lockRun.lock === "Washington Commanders" && lockRun.tvs.anchors === lockRu
 check(run("computeSaturationCount(4, 3, 0.70)") === 3 && run("computeSaturationCount(4, 4, 0.70)") === 3 && run("computeSaturationCount(3, 3, 0.70)") === 2,
   "saturation reserve: the diehard screen is the independent secondary (S 4 + diehard → 3; S 4, no diehard → 3; S 3 → 2)");
 
+{
+  const gen = run(`(() => { const dc = buildVenue({ marketId: "washington-dc", totalTVs: 5 }), ny = buildVenue({ marketId: "new-york", totalTVs: 9 });
+    const bj = __g({ sport: "NHL", homeTeam: "New Jersey Devils", awayTeam: "Columbus Blue Jackets" });
+    const mnf = __g({ sport: "NFL", homeTeam: "Washington Commanders", awayTeam: "Cincinnati Bengals", nationalFloor: 80 });
+    const away = __g({ sport: "NFL", homeTeam: "Kansas City Chiefs", awayTeam: "Buffalo Bills", nationalFloor: 80 });
+    return [isGenericOutOfMarket(bj, dc), isGenericOutOfMarket(bj, ny), isGenericOutOfMarket(away, ny)]; })()`);
+  check(gen.join() === "true,false,false", `generic out-of-market: Blue Jackets @ Devils in DC yes, in New York no (Devils home); national-floor game no (${gen})`);
+}
+
 const none = run(`(() => {
   const v = buildVenue({ marketId: "washington-dc", totalTVs: 7 });
   const a = runAssignmentCycle([__g({ id: "x", homeTeam: "Akron Zips", awayTeam: "Ball State Cardinals" })], v, createAnchorHistory(), __mon430, { programming: [] });

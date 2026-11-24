@@ -363,6 +363,12 @@ function knownProgrammingNow(games, venue, now) {
 // programTVs. `history` carries anchor/demotion state between cycles.
 // opts.programming: an explicit list of {channel, show, priority} airing now
 // (golden scenarios); default is the grid in config/programming.js.
+// Generic out-of-market: both teams at the market's default relevance (GENERIC_BASE)
+// and no national floor. Home and regional teams (the Devils in New York) are not generic.
+function isGenericOutOfMarket(game, venue) {
+  return !game.nationalFloor && Math.max(venue.baseTeamScore(game.homeTeam), venue.baseTeamScore(game.awayTeam)) <= GENERIC_BASE;
+}
+
 function runAssignmentCycle(games, venue, history = createAnchorHistory(), now = new Date(), opts = {}) {
   const classified = games.map(g => {
     const nf = nationalFloorOf(g, games);
@@ -373,8 +379,16 @@ function runAssignmentCycle(games, venue, history = createAnchorHistory(), now =
   const lockPool = eligibleNow.length ? eligibleNow : fillerNow;
 
   const lockResult = resolveLocks(lockPool, venue);        // before scoring, by identity
-  const scored = scoreGames(eligibleNow.length ? eligibleNow : fillerNow, venue, now);
-  const fillerScored = eligibleNow.length ? scoreGames(fillerNow, venue, now) : [];
+  let scored = scoreGames(eligibleNow.length ? eligibleNow : fillerNow, venue, now);
+  let fillerScored = eligibleNow.length ? scoreGames(fillerNow, venue, now) : [];
+  // While a market lock game is live (not a national lock), generic out-of-market
+  // games are filler: they only get TVs left after games and known-content channels.
+  if (lockResult.primary && !lockResult.primary.item.national) {
+    const lockedIds = new Set([lockResult.primary, ...lockResult.others].map(m => m.game.id));
+    const generic = scored.filter(g => !lockedIds.has(g.id) && isGenericOutOfMarket(g, venue));
+    scored = scored.filter(g => !generic.includes(g));
+    fillerScored = [...fillerScored, ...generic];
+  }
   const grid = opts.programming || knownProgrammingNow(games, venue, now);
   const a = programTVs(scored, fillerScored, lockResult, venue, history, now, grid);
   a.poolTier = eligibleNow.length ? "eligible" : fillerNow.length ? "filler" : "none";
